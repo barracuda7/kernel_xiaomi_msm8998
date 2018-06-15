@@ -1707,8 +1707,8 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
  * fragmentation due to mixed migratetype pages in one pageblock.
  */
 int find_suitable_fallback(struct free_area *area, unsigned int current_order,
-			   int migratetype, bool only_stealable,
-			   int start_order, bool *can_steal)
+			int migratetype, bool only_stealable,
+			int start_order, bool *can_steal)
 {
 	int i;
 	int fallback_mt;

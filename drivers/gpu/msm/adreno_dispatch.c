@@ -2844,7 +2844,7 @@ int adreno_dispatcher_idle(struct adreno_device *adreno_dev)
 	adreno_get_gpu_halt(adreno_dev);
 
 	mutex_unlock(&device->mutex);
-	
+
 	ret = wait_for_completion_timeout(&dispatcher->idle_gate,
 			msecs_to_jiffies(ADRENO_IDLE_TIMEOUT));
 	if (ret == 0) {

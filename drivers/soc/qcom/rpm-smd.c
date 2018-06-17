@@ -2126,15 +2126,14 @@ static int msm_rpm_dev_probe(struct platform_device *pdev)
 
 	smd_disable_read_intr(msm_rpm_data.ch_info);
 
-        msm_rpm_smd_wq = alloc_workqueue("rpm-smd",	
- 			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);	
- 	if (!msm_rpm_smd_wq) {	
- 		pr_err("%s: Unable to alloc rpm-smd workqueue\n", __func__);	
- 		ret = -EINVAL;	
- 		goto fail;	
- 	}	
- 	queue_work(msm_rpm_smd_wq, &msm_rpm_data.work);	
- 
+	msm_rpm_smd_wq = alloc_workqueue("rpm-smd",
+			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);
+	if (!msm_rpm_smd_wq) {
+		pr_err("%s: Unable to alloc rpm-smd workqueue\n", __func__);
+		ret = -EINVAL;
+		goto fail;
+	}
+	queue_work(msm_rpm_smd_wq, &msm_rpm_data.work);
 
 	probe_status = ret;
 skip_init:

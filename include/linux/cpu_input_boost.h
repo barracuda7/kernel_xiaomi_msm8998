@@ -1,4 +1,5 @@
-/* Copyright (c) 2011, 2014-2016 The Linux Foundation. All rights reserved.
+/*
+ * Copyright (C) 2018, Sultan Alsawaf <sultanxda@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,15 +9,16 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
  */
+#ifndef _CPU_INPUT_BOOST_H_
+#define _CPU_INPUT_BOOST_H_
 
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/init.h>
+#ifdef CONFIG_CPU_INPUT_BOOST
+void cpu_input_boost_kick(void);
+#else
+static inline void cpu_input_boost_kick(void)
+{
+}
+#endif
 
-int msm_show_resume_irq_mask;
-
-module_param_named(
-	debug_mask, msm_show_resume_irq_mask, int, S_IRUGO | S_IWUSR | S_IWGRP
-);
+#endif /* _CPU_INPUT_BOOST_H_ */

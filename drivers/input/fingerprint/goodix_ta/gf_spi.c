@@ -32,6 +32,7 @@
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
 #include <linux/fb.h>
+#include <linux/sched.h>
 
 #include "gf_spi.h"
 
@@ -172,7 +173,7 @@ static int gf_open(struct inode *inode, struct file *filp)
 	 */
 	gf_dev->irq_enabled = true;
 	rc = request_threaded_irq(gf_dev->irq, NULL, gf_irq,
-			IRQF_TRIGGER_RISING | IRQF_ONESHOT | IRQF_PERF_CRITICAL,
+			IRQF_TRIGGER_RISING | IRQF_ONESHOT,
 			GF_IRQ_NAME, gf_dev);
 	if (rc) {
 		pr_err("%s: failed to request threaded irq, rc = %d\n", __func__, rc);
@@ -248,7 +249,7 @@ static void gf_event_worker(struct work_struct *work)
 	 */
 	case GF_NET_EVENT_FB_BLACK:
 		gf_dev->display_on = false;
-		set_user_nice(gf_dev->process, -1);
+		set_user_nice(gf_dev->process, MIN_NICE);
 		gf_irq_update(gf_dev);
 		break;
 	case GF_NET_EVENT_FB_UNBLACK:
@@ -382,8 +383,8 @@ static int gf_probe(struct platform_device *pdev)
 
 	gf_dev->process = NULL;
 	gf_dev->display_on = true;
-	gf_dev->enable_key_events = true;
 	gf_dev->irq_enabled = false;
+	gf_dev->enable_key_events = true;
 	gf_dev->proximity_state = 0;
 
 	platform_set_drvdata(pdev, gf_dev);

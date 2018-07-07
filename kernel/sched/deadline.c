@@ -18,6 +18,8 @@
 
 #include <linux/slab.h>
 
+#include "walt.h"
+
 struct dl_bandwidth def_dl_bandwidth;
 
 static inline struct task_struct *dl_task_of(struct sched_dl_entity *dl_se)
@@ -992,41 +994,6 @@ static inline void dec_dl_deadline(struct dl_rq *dl_rq, u64 deadline) {}
 
 #endif /* CONFIG_SMP */
 
-#ifdef CONFIG_SCHED_HMP
-
-static void
-inc_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p)
-{
-	inc_cumulative_runnable_avg(&rq->hmp_stats, p);
-}
-
-static void
-dec_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p)
-{
-	dec_cumulative_runnable_avg(&rq->hmp_stats, p);
-}
-
-static void
-fixup_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p,
-			 u32 new_task_load, u32 new_pred_demand)
-{
-	s64 task_load_delta = (s64)new_task_load - task_load(p);
-	s64 pred_demand_delta = PRED_DEMAND_DELTA;
-
-	fixup_cumulative_runnable_avg(&rq->hmp_stats, p, task_load_delta,
-				      pred_demand_delta);
-}
-
-#else	/* CONFIG_SCHED_HMP */
-
-static inline void
-inc_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p) { }
-
-static inline void
-dec_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p) { }
-
-#endif	/* CONFIG_SCHED_HMP */
-
 static inline
 void inc_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 {
@@ -1036,7 +1003,7 @@ void inc_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 	WARN_ON(!dl_prio(prio));
 	dl_rq->dl_nr_running++;
 	add_nr_running(rq_of_dl_rq(dl_rq), 1);
-	inc_hmp_sched_stats_dl(rq_of_dl_rq(dl_rq), dl_task_of(dl_se));
+	walt_inc_cumulative_runnable_avg(rq_of_dl_rq(dl_rq), dl_task_of(dl_se));
 
 	inc_dl_deadline(dl_rq, deadline);
 	inc_dl_migration(dl_se, dl_rq);
@@ -1051,7 +1018,7 @@ void dec_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 	WARN_ON(!dl_rq->dl_nr_running);
 	dl_rq->dl_nr_running--;
 	sub_nr_running(rq_of_dl_rq(dl_rq), 1);
-	dec_hmp_sched_stats_dl(rq_of_dl_rq(dl_rq), dl_task_of(dl_se));
+	walt_dec_cumulative_runnable_avg(rq_of_dl_rq(dl_rq), dl_task_of(dl_se));
 
 	dec_dl_deadline(dl_rq, dl_se->deadline);
 	dec_dl_migration(dl_se, dl_rq);
@@ -1231,7 +1198,8 @@ static void yield_task_dl(struct rq *rq)
 static int find_later_rq(struct task_struct *task);
 
 static int
-select_task_rq_dl(struct task_struct *p, int cpu, int sd_flag, int flags)
+select_task_rq_dl(struct task_struct *p, int cpu, int sd_flag, int flags,
+		  int sibling_count_hint)
 {
 	struct task_struct *curr;
 	struct rq *rq;
@@ -1520,7 +1488,7 @@ static int find_later_rq(struct task_struct *task)
 	struct sched_domain *sd;
 	struct cpumask *later_mask = this_cpu_cpumask_var_ptr(local_cpu_mask_dl);
 	int this_cpu = smp_processor_id();
-	int best_cpu, cpu = task_cpu(task);
+	int cpu = task_cpu(task);
 
 	/* Make sure the mask is initialized first */
 	if (unlikely(!later_mask))
@@ -1533,17 +1501,14 @@ static int find_later_rq(struct task_struct *task)
 	 * We have to consider system topology and task affinity
 	 * first, then we can look for a suitable cpu.
 	 */
-	best_cpu = cpudl_find(&task_rq(task)->rd->cpudl,
-			task, later_mask);
-	if (best_cpu == -1)
+	if (cpudl_find(&task_rq(task)->rd->cpudl, task, later_mask) == -1)
 		return -1;
 
 	/*
-	 * If we are here, some target has been found,
-	 * the most suitable of which is cached in best_cpu.
-	 * This is, among the runqueues where the current tasks
-	 * have later deadlines than the task's one, the rq
-	 * with the latest possible one.
+	 * If we are here, some targets have been found, including
+	 * the most suitable which is, among the runqueues where the
+	 * current tasks have later deadlines than the task's one, the
+	 * rq with the latest possible one.
 	 *
 	 * Now we check how well this matches with task's
 	 * affinity and system topology.
@@ -1563,6 +1528,7 @@ static int find_later_rq(struct task_struct *task)
 	rcu_read_lock();
 	for_each_domain(cpu, sd) {
 		if (sd->flags & SD_WAKE_AFFINE) {
+			int best_cpu;
 
 			/*
 			 * If possible, preempting this_cpu is
@@ -1574,12 +1540,15 @@ static int find_later_rq(struct task_struct *task)
 				return this_cpu;
 			}
 
+			best_cpu = cpumask_first_and(later_mask,
+							sched_domain_span(sd));
 			/*
-			 * Last chance: if best_cpu is valid and is
-			 * in the mask, that becomes our choice.
+			 * Last chance: if a cpu being in both later_mask
+			 * and current sd span is valid, that becomes our
+			 * choice. Of course, the latest possible cpu is
+			 * already under consideration through later_mask.
 			 */
-			if (best_cpu < nr_cpu_ids &&
-			    cpumask_test_cpu(best_cpu, sched_domain_span(sd))) {
+			if (best_cpu < nr_cpu_ids) {
 				rcu_read_unlock();
 				return best_cpu;
 			}
@@ -1749,7 +1718,9 @@ retry:
 	next_task->on_rq = TASK_ON_RQ_MIGRATING;
 	deactivate_task(rq, next_task, 0);
 	clear_average_bw(&next_task->dl, &rq->dl);
+	next_task->on_rq = TASK_ON_RQ_MIGRATING;
 	set_task_cpu(next_task, later_rq->cpu);
+	next_task->on_rq = TASK_ON_RQ_QUEUED;
 	add_average_bw(&next_task->dl, &later_rq->dl);
 	activate_task(later_rq, next_task, 0);
 	next_task->on_rq = TASK_ON_RQ_QUEUED;
@@ -1841,7 +1812,9 @@ static void pull_dl_task(struct rq *this_rq)
 			p->on_rq = TASK_ON_RQ_MIGRATING;
 			deactivate_task(src_rq, p, 0);
 			clear_average_bw(&p->dl, &src_rq->dl);
+			p->on_rq = TASK_ON_RQ_MIGRATING;
 			set_task_cpu(p, this_cpu);
+			p->on_rq = TASK_ON_RQ_QUEUED;
 			add_average_bw(&p->dl, &this_rq->dl);
 			activate_task(this_rq, p, 0);
 			p->on_rq = TASK_ON_RQ_QUEUED;
@@ -2046,11 +2019,6 @@ const struct sched_class dl_sched_class = {
 	.switched_to		= switched_to_dl,
 
 	.update_curr		= update_curr_dl,
-#ifdef CONFIG_SCHED_HMP
-	.inc_hmp_sched_stats	= inc_hmp_sched_stats_dl,
-	.dec_hmp_sched_stats	= dec_hmp_sched_stats_dl,
-	.fixup_hmp_sched_stats	= fixup_hmp_sched_stats_dl,
-#endif
 };
 
 #ifdef CONFIG_SCHED_DEBUG

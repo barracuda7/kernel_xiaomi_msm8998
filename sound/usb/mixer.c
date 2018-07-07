@@ -974,6 +974,14 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 		}
 		break;
 
+	case USB_ID(0x0d8c, 0x0103):
+		if (!strcmp(kctl->id.name, "PCM Playback Volume")) {
+			usb_audio_info(chip,
+				 "set volume quirk for CM102-A+/102S+\n");
+			cval->min = -256;
+		}
+		break;
+
 	case USB_ID(0x0471, 0x0101):
 	case USB_ID(0x0471, 0x0104):
 	case USB_ID(0x0471, 0x0105):
@@ -2334,7 +2342,7 @@ static int parse_audio_selector_unit(struct mixer_build *state, int unitid,
 		cval->control = (desc->bDescriptorSubtype == UAC2_CLOCK_SELECTOR) ?
 			UAC2_CX_CLOCK_SELECTOR : UAC2_SU_SELECTOR;
 
-	namelist = kmalloc(sizeof(char *) * desc->bNrInPins, GFP_KERNEL);
+	namelist = kmalloc_array(desc->bNrInPins, sizeof(char *), GFP_KERNEL);
 	if (!namelist) {
 		kfree(cval);
 		return -ENOMEM;

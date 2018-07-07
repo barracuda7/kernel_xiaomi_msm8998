@@ -26,6 +26,16 @@ config IRQ_WORK
 config BUILDTIME_EXTABLE_SORT
 	bool
 
+config THREAD_INFO_IN_TASK
+	bool
+	help
+	  Select this to move thread_info off the stack into task_struct.  To
+	  make this work, an arch will need to remove all thread_info fields
+	  except flags and fix any runtime bugs.
+
+	  One subtle change that will be needed is to use try_get_task_stack()
+	  and put_task_stack() in save_thread_stack_tsk() and get_wchan().
+
 menu "General setup"
 
 config BROKEN
@@ -1197,33 +1207,6 @@ config CGROUP_WRITEBACK
 
 endif # CGROUPS
 
-config SCHED_HMP
-	bool "Scheduler support for heterogenous multi-processor systems"
-	depends on SMP && FAIR_GROUP_SCHED
-	help
-	  This feature will let the scheduler optimize task placement on
-	  systems made of heterogeneous cpus i.e cpus that differ either
-	  in their instructions per-cycle capability or the maximum
-	  frequency they can attain.
-
-config SCHED_HMP_CSTATE_AWARE
-	bool "CPU C-state aware scheduler"
-	depends on SCHED_HMP
-	help
-	  This feature will let the HMP scheduler optimize task placement
-	  with CPUs C-state. If this is enabled, scheduler places tasks
-	  onto the shallowest C-state CPU among the most power efficient CPUs.
-
-config SCHED_CORE_CTL
-	bool "QTI Core Control"
-	depends on SMP
-	help
-	  This options enables the core control functionality in
-	  the scheduler. Core control automatically offline and
-	  online cores based on cpu load and utilization.
-
-	  If unsure, say N here.
-
 config CHECKPOINT_RESTORE
 	bool "Checkpoint/restore support" if EXPERT
 	select PROC_CHILDREN
@@ -1416,6 +1399,17 @@ source "usr/Kconfig"
 
 endif
 
+choice
+	prompt "Compiler optimization level"
+	default CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+
+config CC_OPTIMIZE_FOR_PERFORMANCE
+	bool "Optimize for performance"
+	help
+	  This is the default optimization level for the kernel, building
+	  with the "-O2" compiler flag for best performance and most
+	  helpful compile-time warnings.
+
 config CC_OPTIMIZE_FOR_SIZE
 	bool "Optimize for size"
 	help
@@ -1423,6 +1417,8 @@ config CC_OPTIMIZE_FOR_SIZE
 	  your compiler resulting in a smaller kernel.
 
 	  If unsure, say N.
+
+endchoice
 
 config SYSCTL
 	bool

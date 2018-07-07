@@ -2330,8 +2330,8 @@ static int e1000_alloc_ring_dma(struct e1000_adapter *adapter,
 {
 	struct pci_dev *pdev = adapter->pdev;
 
-	ring->desc = dma_alloc_coherent(&pdev->dev, ring->size, &ring->dma,
-					GFP_KERNEL);
+	ring->desc = dma_zalloc_coherent(&pdev->dev, ring->size, &ring->dma,
+					 GFP_KERNEL);
 	if (!ring->desc)
 		return -ENOMEM;
 
@@ -3338,7 +3338,7 @@ static int e1000e_write_mc_addr_list(struct net_device *netdev)
 		return 0;
 	}
 
-	mta_list = kzalloc(netdev_mc_count(netdev) * ETH_ALEN, GFP_ATOMIC);
+	mta_list = kcalloc(netdev_mc_count(netdev), ETH_ALEN, GFP_ATOMIC);
 	if (!mta_list)
 		return -ENOMEM;
 

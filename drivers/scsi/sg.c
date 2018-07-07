@@ -1062,7 +1062,7 @@ sg_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
 		else {
 			sg_req_info_t *rinfo;
 
-			rinfo = kzalloc(SZ_SG_REQ_INFO * SG_MAX_QUEUE,
+			rinfo = kcalloc(SG_MAX_QUEUE, SZ_SG_REQ_INFO,
 					GFP_KERNEL);
 			if (!rinfo)
 				return -ENOMEM;
@@ -1904,7 +1904,7 @@ retry:
 		num = (rem_sz > scatter_elem_sz_prev) ?
 			scatter_elem_sz_prev : rem_sz;
 
-		schp->pages[k] = alloc_pages(gfp_mask, order);
+		schp->pages[k] = alloc_pages(gfp_mask | __GFP_ZERO, order);
 		if (!schp->pages[k])
 			goto out;
 

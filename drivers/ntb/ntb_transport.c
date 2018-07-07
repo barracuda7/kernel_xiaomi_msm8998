@@ -955,6 +955,9 @@ static int ntb_transport_init_queue(struct ntb_transport_ctx *nt,
 	mw_base = nt->mw_vec[mw_num].phys_addr;
 	mw_size = nt->mw_vec[mw_num].phys_size;
 
+	if (max_mw_size && mw_size > max_mw_size)
+		mw_size = max_mw_size;
+
 	tx_size = (unsigned int)mw_size / num_qps_mw;
 	qp_offset = tx_size * (qp_num / mw_count);
 
@@ -1033,7 +1036,7 @@ static int ntb_transport_probe(struct ntb_client *self, struct ntb_dev *ndev)
 
 	nt->mw_count = mw_count;
 
-	nt->mw_vec = kzalloc_node(mw_count * sizeof(*nt->mw_vec),
+	nt->mw_vec = kcalloc_node(mw_count, sizeof(*nt->mw_vec),
 				  GFP_KERNEL, node);
 	if (!nt->mw_vec) {
 		rc = -ENOMEM;
@@ -1074,7 +1077,7 @@ static int ntb_transport_probe(struct ntb_client *self, struct ntb_dev *ndev)
 	nt->qp_bitmap = qp_bitmap;
 	nt->qp_bitmap_free = qp_bitmap;
 
-	nt->qp_vec = kzalloc_node(qp_count * sizeof(*nt->qp_vec),
+	nt->qp_vec = kcalloc_node(qp_count, sizeof(*nt->qp_vec),
 				  GFP_KERNEL, node);
 	if (!nt->qp_vec) {
 		rc = -ENOMEM;

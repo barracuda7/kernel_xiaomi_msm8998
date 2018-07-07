@@ -161,7 +161,7 @@ int acpi_processor_ppc_has_changed(struct acpi_processor *pr, int event_flag)
 {
 	int ret;
 
-	if (ignore_ppc) {
+	if (ignore_ppc || !pr->performance) {
 		/*
 		 * Only when it is notification event, the _OST object
 		 * will be evaluated. Otherwise it is skipped.
@@ -347,8 +347,9 @@ static int acpi_processor_get_performance_states(struct acpi_processor *pr)
 
 	pr->performance->state_count = pss->package.count;
 	pr->performance->states =
-	    kmalloc(sizeof(struct acpi_processor_px) * pss->package.count,
-		    GFP_KERNEL);
+	    kmalloc_array(pss->package.count,
+			  sizeof(struct acpi_processor_px),
+			  GFP_KERNEL);
 	if (!pr->performance->states) {
 		result = -ENOMEM;
 		goto end;

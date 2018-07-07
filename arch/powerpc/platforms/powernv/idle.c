@@ -242,7 +242,7 @@ static int __init pnv_init_idle_states(void)
 	if (cpuidle_disable != IDLE_NO_OVERRIDE)
 		goto out;
 
-	if (!firmware_has_feature(FW_FEATURE_OPALv3))
+	if (!firmware_has_feature(FW_FEATURE_OPAL))
 		goto out;
 
 	power_mgt = of_find_node_by_path("/ibm,opal/power-mgt");
@@ -257,7 +257,7 @@ static int __init pnv_init_idle_states(void)
 		goto out;
 	}
 
-	flags = kzalloc(sizeof(*flags) * dt_idle_states, GFP_KERNEL);
+	flags = kcalloc(dt_idle_states, sizeof(*flags), GFP_KERNEL);
 	if (of_property_read_u32_array(power_mgt,
 			"ibm,cpu-idle-state-flags", flags, dt_idle_states)) {
 		pr_warn("cpuidle-powernv: missing ibm,cpu-idle-state-flags in DT\n");

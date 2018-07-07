@@ -1321,9 +1321,10 @@ static int _aac_reset_adapter(struct aac_dev *aac, int forced)
 	host = aac->scsi_host_ptr;
 	scsi_block_requests(host);
 	aac_adapter_disable_int(aac);
-	if (aac->thread->pid != current->pid) {
+	if (aac->thread && aac->thread->pid != current->pid) {
 		spin_unlock_irq(host->host_lock);
 		kthread_stop(aac->thread);
+		aac->thread = NULL;
 		jafo = 1;
 	}
 
@@ -1392,6 +1393,7 @@ static int _aac_reset_adapter(struct aac_dev *aac, int forced)
 					  aac->name);
 		if (IS_ERR(aac->thread)) {
 			retval = PTR_ERR(aac->thread);
+			aac->thread = NULL;
 			goto out;
 		}
 	}
@@ -1776,8 +1778,8 @@ int aac_command_thread(void *data)
 				hw_fib_pool = NULL;
 				fib_pool = NULL;
 				if (num
-				 && ((hw_fib_pool = kmalloc(sizeof(struct hw_fib *) * num, GFP_KERNEL)))
-				 && ((fib_pool = kmalloc(sizeof(struct fib *) * num, GFP_KERNEL)))) {
+				 && ((hw_fib_pool = kmalloc_array(num, sizeof(struct hw_fib *), GFP_KERNEL)))
+				 && ((fib_pool = kmalloc_array(num, sizeof(struct fib *), GFP_KERNEL)))) {
 					hw_fib_p = hw_fib_pool;
 					fib_p = fib_pool;
 					while (hw_fib_p < &hw_fib_pool[num]) {

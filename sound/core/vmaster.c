@@ -68,10 +68,13 @@ static int slave_update(struct link_slave *slave)
 		return -ENOMEM;
 	uctl->id = slave->slave.id;
 	err = slave->slave.get(&slave->slave, uctl);
+	if (err < 0)
+		goto error;
 	for (ch = 0; ch < slave->info.count; ch++)
 		slave->vals[ch] = uctl->value.integer.value[ch];
+ error:
 	kfree(uctl);
-	return 0;
+	return err < 0 ? err : 0;
 }
 
 /* get the slave ctl info and save the initial values */
@@ -256,8 +259,8 @@ int _snd_ctl_add_slave(struct snd_kcontrol *master, struct snd_kcontrol *slave,
 	struct link_master *master_link = snd_kcontrol_chip(master);
 	struct link_slave *srec;
 
-	srec = kzalloc(sizeof(*srec) +
-		       slave->count * sizeof(*slave->vd), GFP_KERNEL);
+	srec = kzalloc(CHECKME_struct_size(&*srec, *slave->vd, slave->count),
+		       GFP_KERNEL);
 	if (!srec)
 		return -ENOMEM;
 	srec->kctl = slave;

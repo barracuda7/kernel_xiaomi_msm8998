@@ -689,7 +689,7 @@ static int kdb_defcmd2(const char *cmdstr, const char *argv0)
 	}
 	if (!s->usable)
 		return KDB_NOTIMP;
-	s->command = kzalloc((s->count + 1) * sizeof(*(s->command)), GFP_KDB);
+	s->command = kcalloc(s->count + 1, sizeof(*(s->command)), GFP_KDB);
 	if (!s->command) {
 		kdb_printf("Could not allocate new kdb_defcmd table for %s\n",
 			   cmdstr);
@@ -727,8 +727,8 @@ static int kdb_defcmd(int argc, const char **argv)
 		kdb_printf("Command only available during kdb_init()\n");
 		return KDB_NOTIMP;
 	}
-	defcmd_set = kmalloc((defcmd_set_count + 1) * sizeof(*defcmd_set),
-			     GFP_KDB);
+	defcmd_set = kmalloc_array(defcmd_set_count + 1, sizeof(*defcmd_set),
+				   GFP_KDB);
 	if (!defcmd_set)
 		goto fail_defcmd;
 	memcpy(defcmd_set, save_defcmd_set,
@@ -1564,6 +1564,7 @@ static int kdb_md(int argc, const char **argv)
 	int symbolic = 0;
 	int valid = 0;
 	int phys = 0;
+	int raw = 0;
 
 	kdbgetintenv("MDCOUNT", &mdcount);
 	kdbgetintenv("RADIX", &radix);
@@ -1573,9 +1574,10 @@ static int kdb_md(int argc, const char **argv)
 	repeat = mdcount * 16 / bytesperword;
 
 	if (strcmp(argv[0], "mdr") == 0) {
-		if (argc != 2)
+		if (argc == 2 || (argc == 0 && last_addr != 0))
+			valid = raw = 1;
+		else
 			return KDB_ARGCOUNT;
-		valid = 1;
 	} else if (isdigit(argv[0][2])) {
 		bytesperword = (int)(argv[0][2] - '0');
 		if (bytesperword == 0) {
@@ -1611,7 +1613,10 @@ static int kdb_md(int argc, const char **argv)
 		radix = last_radix;
 		bytesperword = last_bytesperword;
 		repeat = last_repeat;
-		mdcount = ((repeat * bytesperword) + 15) / 16;
+		if (raw)
+			mdcount = repeat;
+		else
+			mdcount = ((repeat * bytesperword) + 15) / 16;
 	}
 
 	if (argc) {
@@ -1628,7 +1633,10 @@ static int kdb_md(int argc, const char **argv)
 			diag = kdbgetularg(argv[nextarg], &val);
 			if (!diag) {
 				mdcount = (int) val;
-				repeat = mdcount * 16 / bytesperword;
+				if (raw)
+					repeat = mdcount;
+				else
+					repeat = mdcount * 16 / bytesperword;
 			}
 		}
 		if (argc >= nextarg+1) {
@@ -1638,8 +1646,15 @@ static int kdb_md(int argc, const char **argv)
 		}
 	}
 
-	if (strcmp(argv[0], "mdr") == 0)
-		return kdb_mdr(addr, mdcount);
+	if (strcmp(argv[0], "mdr") == 0) {
+		int ret;
+		last_addr = addr;
+		ret = kdb_mdr(addr, mdcount);
+		last_addr += mdcount;
+		last_repeat = mdcount;
+		last_bytesperword = bytesperword; // to make REPEAT happy
+		return ret;
+	}
 
 	switch (radix) {
 	case 10:
@@ -2719,8 +2734,9 @@ int kdb_register_flags(char *cmd,
 	}
 
 	if (i >= kdb_max_commands) {
-		kdbtab_t *new = kmalloc((kdb_max_commands - KDB_BASE_CMD_MAX +
-			 kdb_command_extend) * sizeof(*new), GFP_KDB);
+		kdbtab_t *new = kmalloc_array(kdb_max_commands - KDB_BASE_CMD_MAX + kdb_command_extend,
+					      sizeof(*new),
+					      GFP_KDB);
 		if (!new) {
 			kdb_printf("Could not allocate new kdb_command "
 				   "table\n");

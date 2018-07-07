@@ -716,7 +716,6 @@ void do_exit(long code)
 
 	exit_signals(tsk);  /* sets PF_EXITING */
 
-	sched_exit(tsk);
 	schedtune_exit_task(tsk);
 
 	if (tsk->flags & PF_SU) {
@@ -1631,6 +1630,10 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
 		return -EINVAL;
+
+	/* -INT_MIN is not defined */
+	if (upid == INT_MIN)
+		return -ESRCH;
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;

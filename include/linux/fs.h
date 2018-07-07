@@ -940,9 +940,9 @@ static inline struct file *get_file(struct file *f)
 /* Page cache limit. The filesystems should put that into their s_maxbytes 
    limits, otherwise bad things can happen in VM. */ 
 #if BITS_PER_LONG==32
-#define MAX_LFS_FILESIZE	(((loff_t)PAGE_CACHE_SIZE << (BITS_PER_LONG-1))-1) 
+#define MAX_LFS_FILESIZE	((loff_t)ULONG_MAX << PAGE_SHIFT)
 #elif BITS_PER_LONG==64
-#define MAX_LFS_FILESIZE 	((loff_t)0x7fffffffffffffffLL)
+#define MAX_LFS_FILESIZE 	((loff_t)LLONG_MAX)
 #endif
 
 #define FL_POSIX	1
@@ -1768,6 +1768,7 @@ struct super_operations {
 	void *(*clone_mnt_data) (void *);
 	void (*copy_mnt_data) (void *, void *);
 	void (*umount_begin) (struct super_block *);
+	void (*umount_end) (struct super_block *, int);
 
 	int (*show_options)(struct seq_file *, struct dentry *);
 	int (*show_options2)(struct vfsmount *,struct seq_file *, struct dentry *);

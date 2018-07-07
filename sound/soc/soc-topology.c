@@ -857,7 +857,7 @@ static int soc_tplg_denum_create_texts(struct soc_enum *se,
 	int i, ret;
 
 	se->dobj.control.dtexts =
-		kzalloc(sizeof(char *) * ec->items, GFP_KERNEL);
+		kcalloc(ec->items, sizeof(char *), GFP_KERNEL);
 	if (se->dobj.control.dtexts == NULL)
 		return -ENOMEM;
 
@@ -1188,6 +1188,9 @@ static struct snd_kcontrol_new *soc_tplg_dapm_widget_dmixer_create(
 			kfree(sm);
 			continue;
 		}
+
+		/* create any TLV data */
+		soc_tplg_create_tlv(tplg, &kc[i], &mc->hdr);
 	}
 	return kc;
 

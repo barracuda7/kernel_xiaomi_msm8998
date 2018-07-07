@@ -654,7 +654,10 @@ static bool proc_sys_link_fill_cache(struct file *file,
 				    struct ctl_table *table)
 {
 	bool ret = true;
+
 	head = sysctl_head_grab(head);
+	if (IS_ERR(head))
+		return false;
 
 	if (S_ISLNK(table->mode)) {
 		/* It is not an error if we can not follow the link ignore it */
@@ -1346,7 +1349,7 @@ static int register_leaf_sysctl_tables(const char *path, char *pos,
 	/* If there are mixed files and directories we need a new table */
 	if (nr_dirs && nr_files) {
 		struct ctl_table *new;
-		files = kzalloc(sizeof(struct ctl_table) * (nr_files + 1),
+		files = kcalloc(nr_files + 1, sizeof(struct ctl_table),
 				GFP_KERNEL);
 		if (!files)
 			goto out;

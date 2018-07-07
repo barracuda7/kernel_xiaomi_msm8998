@@ -1533,7 +1533,7 @@ static void pl330_dotask(unsigned long data)
 /* Returns 1 if state was updated, 0 otherwise */
 static int pl330_update(struct pl330_dmac *pl330)
 {
-	struct dma_pl330_desc *descdone, *tmp;
+	struct dma_pl330_desc *descdone;
 	unsigned long flags;
 	void __iomem *regs;
 	u32 val;
@@ -1611,7 +1611,9 @@ static int pl330_update(struct pl330_dmac *pl330)
 	}
 
 	/* Now that we are in no hurry, do the callbacks */
-	list_for_each_entry_safe(descdone, tmp, &pl330->req_done, rqd) {
+	while (!list_empty(&pl330->req_done)) {
+		descdone = list_first_entry(&pl330->req_done,
+					    struct dma_pl330_desc, rqd);
 		list_del(&descdone->rqd);
 		spin_unlock_irqrestore(&pl330->lock, flags);
 		dma_pl330_rqcb(descdone, PL330_ERR_NONE);
@@ -1784,7 +1786,7 @@ static int dmac_alloc_threads(struct pl330_dmac *pl330)
 	int i;
 
 	/* Allocate 1 Manager and 'chans' Channel threads */
-	pl330->channels = kzalloc((1 + chans) * sizeof(*thrd),
+	pl330->channels = kcalloc(1 + chans, sizeof(*thrd),
 					GFP_KERNEL);
 	if (!pl330->channels)
 		return -ENOMEM;
@@ -2848,7 +2850,7 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 
 	pl330->num_peripherals = num_chan;
 
-	pl330->peripherals = kzalloc(num_chan * sizeof(*pch), GFP_KERNEL);
+	pl330->peripherals = kcalloc(num_chan, sizeof(*pch), GFP_KERNEL);
 	if (!pl330->peripherals) {
 		ret = -ENOMEM;
 		dev_err(&adev->dev, "unable to allocate pl330->peripherals\n");

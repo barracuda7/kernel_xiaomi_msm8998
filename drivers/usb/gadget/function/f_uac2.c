@@ -1052,6 +1052,8 @@ afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
 		return ret;
 	}
+	iad_desc.bFirstInterface = ret;
+
 	std_ac_if_desc.bInterfaceNumber = ret;
 	agdev->ac_intf = ret;
 	agdev->ac_alt = 0;
@@ -1106,7 +1108,7 @@ afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 
 	prm = &agdev->uac2.c_prm;
 	prm->max_psize = hs_epout_desc.wMaxPacketSize;
-	prm->rbuf = kzalloc(prm->max_psize * USB_XFERS, GFP_KERNEL);
+	prm->rbuf = kcalloc(prm->max_psize, USB_XFERS, GFP_KERNEL);
 	if (!prm->rbuf) {
 		prm->max_psize = 0;
 		goto err_free_descs;
@@ -1114,7 +1116,7 @@ afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 
 	prm = &agdev->uac2.p_prm;
 	prm->max_psize = hs_epin_desc.wMaxPacketSize;
-	prm->rbuf = kzalloc(prm->max_psize * USB_XFERS, GFP_KERNEL);
+	prm->rbuf = kcalloc(prm->max_psize, USB_XFERS, GFP_KERNEL);
 	if (!prm->rbuf) {
 		prm->max_psize = 0;
 		goto err;

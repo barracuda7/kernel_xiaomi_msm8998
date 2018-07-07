@@ -1007,8 +1007,8 @@ static int msm_eeprom_get_dt_data(struct msm_eeprom_ctrl_t *e_ctrl)
 	CDBG("%s gpio count %d\n", __func__, gpio_array_size);
 
 	if (gpio_array_size > 0) {
-		gpio_array = kzalloc(sizeof(uint16_t) * gpio_array_size,
-			GFP_KERNEL);
+		gpio_array = kcalloc(gpio_array_size, sizeof(uint16_t),
+				     GFP_KERNEL);
 		if (!gpio_array) {
 			pr_err("%s failed %d\n", __func__, __LINE__);
 			goto ERROR3;
@@ -1827,11 +1827,11 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 
 		for (j = 0; j < 3; j++) {
 			if (0 == j) {
-				strlcat(module_eeprom_name, pro_name, sizeof(pro_name));
+				strlcat(module_eeprom_name, pro_name, sizeof(module_eeprom_name));
 			} else if (1 == j) {
-				strlcat(module_eeprom_name, sensor_name, sizeof(sensor_name));
+				strlcat(module_eeprom_name, sensor_name, sizeof(module_eeprom_name));
 			} else {
-				strlcat(module_eeprom_name, module_name, sizeof(module_name));
+				strlcat(module_eeprom_name, module_name, sizeof(module_eeprom_name));
 			}
 		}
 		CDBG("%s: module_eeprom_name = %s\n", __func__, module_eeprom_name);
@@ -1894,7 +1894,7 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 	e_ctrl->is_supported = (e_ctrl->is_supported << 1) | 1;
 
 #ifdef CONFIG_MACH_XIAOMI_MSM8998
-	strlcpy(sensor_eeprom_name[eeprom_name_count].name, module_eeprom_name, sizeof(module_eeprom_name));
+	strlcpy(sensor_eeprom_name[eeprom_name_count].name, module_eeprom_name, sizeof(sensor_eeprom_name[eeprom_name_count].name));
 	pr_err("%s: sensor_eeprom_name[%d] = %s, probe success!\n", __func__, eeprom_name_count, sensor_eeprom_name[eeprom_name_count].name);
 	eeprom_name_count++;
 #endif

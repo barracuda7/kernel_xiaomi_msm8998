@@ -2630,7 +2630,8 @@ static void handle_write_completed(struct r10conf *conf, struct r10bio *r10_bio)
 		for (m = 0; m < conf->copies; m++) {
 			int dev = r10_bio->devs[m].devnum;
 			rdev = conf->mirrors[dev].rdev;
-			if (r10_bio->devs[m].bio == NULL)
+			if (r10_bio->devs[m].bio == NULL ||
+				r10_bio->devs[m].bio->bi_end_io == NULL)
 				continue;
 			if (!r10_bio->devs[m].bio->bi_error) {
 				rdev_clear_badblocks(
@@ -2645,7 +2646,8 @@ static void handle_write_completed(struct r10conf *conf, struct r10bio *r10_bio)
 					md_error(conf->mddev, rdev);
 			}
 			rdev = conf->mirrors[dev].replacement;
-			if (r10_bio->devs[m].repl_bio == NULL)
+			if (r10_bio->devs[m].repl_bio == NULL ||
+				r10_bio->devs[m].repl_bio->bi_end_io == NULL)
 				continue;
 
 			if (!r10_bio->devs[m].repl_bio->bi_error) {
@@ -3502,8 +3504,8 @@ static struct r10conf *setup_conf(struct mddev *mddev)
 		goto out;
 
 	/* FIXME calc properly */
-	conf->mirrors = kzalloc(sizeof(struct raid10_info)*(mddev->raid_disks +
-							    max(0,-mddev->delta_disks)),
+	conf->mirrors = kcalloc(mddev->raid_disks + max(0, -mddev->delta_disks),
+				sizeof(struct raid10_info),
 				GFP_KERNEL);
 	if (!conf->mirrors)
 		goto out;
@@ -3932,11 +3934,9 @@ static int raid10_check_reshape(struct mddev *mddev)
 	conf->mirrors_new = NULL;
 	if (mddev->delta_disks > 0) {
 		/* allocate new 'mirrors' list */
-		conf->mirrors_new = kzalloc(
-			sizeof(struct raid10_info)
-			*(mddev->raid_disks +
-			  mddev->delta_disks),
-			GFP_KERNEL);
+		conf->mirrors_new = kcalloc(mddev->raid_disks + mddev->delta_disks,
+					    sizeof(struct raid10_info),
+					    GFP_KERNEL);
 		if (!conf->mirrors_new)
 			return -ENOMEM;
 	}

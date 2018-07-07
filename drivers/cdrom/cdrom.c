@@ -1154,9 +1154,6 @@ int cdrom_open(struct cdrom_device_info *cdi, struct block_device *bdev,
 
 	cd_dbg(CD_OPEN, "entering cdrom_open\n");
 
-	/* open is event synchronization point, check events first */
-	check_disk_change(bdev);
-
 	/* if this was a O_NONBLOCK open and we should honor the flags,
 	 * do a quick open without drive/disc integrity checks. */
 	cdi->use_count++;
@@ -2127,7 +2124,7 @@ static int cdrom_read_cdda_old(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 	 */
 	nr = nframes;
 	do {
-		cgc.buffer = kmalloc(CD_FRAMESIZE_RAW * nr, GFP_KERNEL);
+		cgc.buffer = kmalloc_array(nr, CD_FRAMESIZE_RAW, GFP_KERNEL);
 		if (cgc.buffer)
 			break;
 

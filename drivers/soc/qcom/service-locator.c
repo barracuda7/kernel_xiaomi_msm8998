@@ -268,9 +268,9 @@ static int service_locator_send_msg(struct pd_qmi_client_data *pd)
 				goto out;
 			}
 
-			pd->domain_list = kmalloc(
-					sizeof(struct servreg_loc_entry_v01) *
-					resp->total_domains, GFP_KERNEL);
+			pd->domain_list = kmalloc_array(resp->total_domains,
+							sizeof(struct servreg_loc_entry_v01),
+							GFP_KERNEL);
 			if (!pd->domain_list) {
 				pr_err("Cannot allocate domain list\n");
 				rc = -ENOMEM;
@@ -280,7 +280,6 @@ static int service_locator_send_msg(struct pd_qmi_client_data *pd)
 		if (db_rev_count != resp->db_rev_count) {
 			pr_err("Service Locator DB updated for client %s\n",
 				pd->client_name);
-			kfree(pd->domain_list);
 			rc = -EAGAIN;
 			goto out;
 		}
@@ -414,6 +413,7 @@ static void pd_locator_work(struct work_struct *work)
 	pdqw->notifier->notifier_call(pdqw->notifier, LOCATOR_UP, data);
 
 err:
+	kfree(data->domain_list);
 	kfree(data);
 	kfree(pdqw);
 }

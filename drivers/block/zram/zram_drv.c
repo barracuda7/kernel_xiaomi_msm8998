@@ -38,7 +38,7 @@ static DEFINE_IDR(zram_index_idr);
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
-static const char *default_compressor = "lz4";
+static const char *default_compressor = "lzo";
 
 /*
  * We don't need to see memory allocation errors more than once every 1
@@ -515,7 +515,7 @@ static struct zram_meta *zram_meta_alloc(char *pool_name, u64 disksize)
 		return NULL;
 
 	num_pages = disksize >> PAGE_SHIFT;
-	meta->table = vzalloc(num_pages * sizeof(*meta->table));
+	meta->table = vzalloc(array_size(num_pages, sizeof(*meta->table)));
 	if (!meta->table) {
 		pr_err("Error allocating zram address table\n");
 		goto out_error;

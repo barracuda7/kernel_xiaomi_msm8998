@@ -2894,7 +2894,7 @@ static void kvmppc_core_free_memslot_hv(struct kvm_memory_slot *free,
 static int kvmppc_core_create_memslot_hv(struct kvm_memory_slot *slot,
 					 unsigned long npages)
 {
-	slot->arch.rmap = vzalloc(npages * sizeof(*slot->arch.rmap));
+	slot->arch.rmap = vzalloc(array_size(npages, sizeof(*slot->arch.rmap)));
 	if (!slot->arch.rmap)
 		return -ENOMEM;
 
@@ -3002,15 +3002,17 @@ static int kvmppc_hv_setup_htab_rma(struct kvm_vcpu *vcpu)
 		goto up_out;
 
 	psize = vma_kernel_pagesize(vma);
-	porder = __ilog2(psize);
 
 	up_read(&current->mm->mmap_sem);
 
 	/* We can handle 4k, 64k or 16M pages in the VRMA */
-	err = -EINVAL;
-	if (!(psize == 0x1000 || psize == 0x10000 ||
-	      psize == 0x1000000))
-		goto out_srcu;
+	if (psize >= 0x1000000)
+		psize = 0x1000000;
+	else if (psize >= 0x10000)
+		psize = 0x10000;
+	else
+		psize = 0x1000;
+	porder = __ilog2(psize);
 
 	/* Update VRMASD field in the LPCR */
 	senc = slb_pgsize_encoding(psize);

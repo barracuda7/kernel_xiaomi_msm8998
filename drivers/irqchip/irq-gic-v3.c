@@ -750,7 +750,7 @@ static void gic_send_sgi(u64 cluster_id, u16 tlist, unsigned int irq)
 	       MPIDR_TO_SGI_AFFINITY(cluster_id, 1)	|
 	       tlist << ICC_SGI1R_TARGET_LIST_SHIFT);
 
-	pr_debug("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
+	pr_devel("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
 	gic_write_sgi1r(val);
 }
 
@@ -1071,7 +1071,8 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	if (of_property_read_u32(node, "#redistributor-regions", &nr_redist_regions))
 		nr_redist_regions = 1;
 
-	rdist_regs = kzalloc(sizeof(*rdist_regs) * nr_redist_regions, GFP_KERNEL);
+	rdist_regs = kcalloc(nr_redist_regions, sizeof(*rdist_regs),
+			     GFP_KERNEL);
 	if (!rdist_regs) {
 		err = -ENOMEM;
 		goto out_unmap_dist;

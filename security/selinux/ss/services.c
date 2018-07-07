@@ -1441,7 +1441,7 @@ static int security_context_to_sid_core(const char *scontext, u32 scontext_len,
 				      scontext_len, &context, def_sid);
 	if (rc == -EINVAL && force) {
 		context.str = str;
-		context.len = scontext_len;
+		context.len = strlen(str) + 1;
 		str = NULL;
 	} else if (rc)
 		goto out_unlock;
@@ -2022,7 +2022,7 @@ int security_load_policy(void *data, size_t len)
 	int rc = 0;
 	struct policy_file file = { data, len }, *fp = &file;
 
-	oldpolicydb = kzalloc(2 * sizeof(*oldpolicydb), GFP_KERNEL);
+	oldpolicydb = kcalloc(2, sizeof(*oldpolicydb), GFP_KERNEL);
 	if (!oldpolicydb) {
 		rc = -ENOMEM;
 		goto out;

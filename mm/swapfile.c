@@ -2301,6 +2301,10 @@ static unsigned long read_swap_header(struct swap_info_struct *p,
 	maxpages = swp_offset(pte_to_swp_entry(
 			swp_entry_to_pte(swp_entry(0, ~0UL)))) + 1;
 	last_page = swap_header->info.last_page;
+	if (!last_page) {
+		pr_warn("Empty swap-file\n");
+		return 0;
+	}
 	if (last_page > maxpages) {
 		pr_warn("Truncating oversized swap area, only using %luk out of %luk\n",
 			maxpages << (PAGE_SHIFT - 10),
@@ -2516,8 +2520,7 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		 */
 		p->cluster_next = 1 + (prandom_u32() % p->highest_bit);
 
-		cluster_info = vzalloc(DIV_ROUND_UP(maxpages,
-			SWAPFILE_CLUSTER) * sizeof(*cluster_info));
+		cluster_info = vzalloc(array_size(sizeof(*cluster_info), DIV_ROUND_UP(maxpages, SWAPFILE_CLUSTER)));
 		if (!cluster_info) {
 			error = -ENOMEM;
 			goto bad_swap;
@@ -2546,7 +2549,7 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 	}
 	/* frontswap enabled? set up bit-per-page map for frontswap */
 	if (frontswap_enabled)
-		frontswap_map = vzalloc(BITS_TO_LONGS(maxpages) * sizeof(long));
+		frontswap_map = vzalloc(array_size(sizeof(long), BITS_TO_LONGS(maxpages)));
 
 	if (p->bdev &&(swap_flags & SWAP_FLAG_DISCARD) && swap_discardable(p)) {
 		/*

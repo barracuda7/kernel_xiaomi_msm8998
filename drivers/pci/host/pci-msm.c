@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2421,6 +2421,13 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			break;
 		}
 
+		if (((base_sel - 1) >= MSM_PCIE_MAX_RES) ||
+					(!dev->res[base_sel - 1].resource)) {
+			PCIE_DBG_FS(dev, "PCIe: RC%d Resource does not exist\n",
+								dev->rc_idx);
+			break;
+		}
+
 		PCIE_DBG_FS(dev,
 			"base: %s: 0x%p\nwr_offset: 0x%x\nwr_mask: 0x%x\nwr_value: 0x%x\n",
 			dev->res[base_sel - 1].name,
@@ -2440,6 +2447,13 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 
 		break;
 	case 13: /* dump all registers of base_sel */
+		if (((base_sel - 1) >= MSM_PCIE_MAX_RES) ||
+					(!dev->res[base_sel - 1].resource)) {
+			PCIE_DBG_FS(dev, "PCIe: RC%d Resource does not exist\n",
+								dev->rc_idx);
+			break;
+		}
+
 		if (!base_sel) {
 			PCIE_DBG_FS(dev, "Invalid base_sel: 0x%x\n", base_sel);
 			break;
@@ -2489,6 +2503,8 @@ int msm_pcie_debug_info(struct pci_dev *dev, u32 option, u32 base,
 		return -ENODEV;
 	}
 
+	pdev = PCIE_BUS_PRIV_DATA(dev->bus);
+
 	if (option == 12 || option == 13) {
 		if (!base || base > 5) {
 			PCIE_DBG_FS(pdev, "Invalid base_sel: 0x%x\n", base);
@@ -2515,7 +2531,6 @@ int msm_pcie_debug_info(struct pci_dev *dev, u32 option, u32 base,
 		}
 	}
 
-	pdev = PCIE_BUS_PRIV_DATA(dev->bus);
 	rc_sel = 1 << pdev->rc_idx;
 
 	msm_pcie_sel_debug_testcase(pdev, option);
@@ -4113,8 +4128,9 @@ static int msm_pcie_get_resources(struct msm_pcie_dev_t *dev,
 	cnt = of_property_count_strings((&pdev->dev)->of_node,
 			"clock-names");
 	if (cnt > 0) {
-		clkfreq = kzalloc((MSM_PCIE_MAX_CLK + MSM_PCIE_MAX_PIPE_CLK) *
-					sizeof(*clkfreq), GFP_KERNEL);
+		clkfreq = kcalloc(MSM_PCIE_MAX_CLK + MSM_PCIE_MAX_PIPE_CLK,
+				  sizeof(*clkfreq),
+				  GFP_KERNEL);
 		if (!clkfreq) {
 			PCIE_ERR(dev, "PCIe: memory alloc failed for RC%d\n",
 					dev->rc_idx);

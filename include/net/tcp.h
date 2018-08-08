@@ -391,6 +391,7 @@ extern int tcp_use_userconfig_sysctl_handler(struct ctl_table *, int,
 extern int tcp_proc_delayed_ack_control(struct ctl_table *, int,
 				void __user *, size_t *, loff_t *);
 
+void tcp_enter_quickack_mode(struct sock *sk);
 static inline void tcp_dec_quickack_mode(struct sock *sk,
 					 const unsigned int pkts)
 {
@@ -574,6 +575,7 @@ void tcp_send_fin(struct sock *sk);
 void tcp_send_active_reset(struct sock *sk, gfp_t priority);
 int tcp_send_synack(struct sock *);
 void tcp_push_one(struct sock *, unsigned int mss_now);
+void __tcp_send_ack(struct sock *sk, u32 rcv_nxt);
 void tcp_send_ack(struct sock *sk);
 void tcp_send_delayed_ack(struct sock *sk);
 void tcp_send_loss_probe(struct sock *sk);
@@ -717,11 +719,14 @@ u32 __tcp_select_window(struct sock *sk);
 
 void tcp_send_window_probe(struct sock *sk);
 
-/* TCP timestamps are only 32-bits, this causes a slight
- * complication on 64-bit systems since we store a snapshot
- * of jiffies in the buffer control blocks below.  We decided
- * to use only the low 32-bits of jiffies and hide the ugly
- * casts with the following macro.
+/* TCP uses 32bit jiffies to save some space.
+ * Note that this is different from tcp_time_stamp, which
+ * historically has been the same until linux-4.13.
+ */
+#define tcp_jiffies32 ((u32)jiffies)
+
+/* Generator for TCP TS option (RFC 7323)
+ * Currently tied to 'jiffies' but will soon be driven by 1 ms clock.
  */
 #define tcp_time_stamp		((__u32)(jiffies))
 
@@ -861,6 +866,11 @@ enum tcp_ca_ack_event_flags {
 
 union tcp_cc_info;
 
+struct ack_sample {
+	u32 pkts_acked;
+	s32 rtt_us;
+};
+
 struct tcp_congestion_ops {
 	struct list_head	list;
 	u32 key;
@@ -884,7 +894,7 @@ struct tcp_congestion_ops {
 	/* new value of cwnd after loss (optional) */
 	u32  (*undo_cwnd)(struct sock *sk);
 	/* hook for packet ack accounting (optional) */
-	void (*pkts_acked)(struct sock *sk, u32 num_acked, s32 rtt_us);
+	void (*pkts_acked)(struct sock *sk, const struct ack_sample *sample);
 	/* get info for inet_diag (optional) */
 	size_t (*get_info)(struct sock *sk, u32 ext, int *attr,
 			   union tcp_cc_info *info);

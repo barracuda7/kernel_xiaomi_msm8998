@@ -1022,19 +1022,7 @@ int cap_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 				cap_lower(new->cap_ambient, arg3);
 			return commit_creds(new);
 		}
-
-	case PR_CAP_AMBIENT:
-		if (arg2 == PR_CAP_AMBIENT_CLEAR_ALL) {
-			if (arg3 | arg4 | arg5)
-				return -EINVAL;
-
-			new = prepare_creds();
-			if (!new)
-				return -ENOMEM;
-			cap_clear(new->cap_ambient);
-			return commit_creds(new);
-		}
-
+	
 		if (((!cap_valid(arg3)) | arg4 | arg5))
 			return -EINVAL;
 

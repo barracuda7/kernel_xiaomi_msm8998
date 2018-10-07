@@ -427,8 +427,8 @@ static int asoc_mmp_sspa_probe(struct platform_device *pdev)
 	if (priv->sspa == NULL)
 		return -ENOMEM;
 
-	priv->dma_params = devm_kzalloc(&pdev->dev,
-			2 * sizeof(struct snd_dmaengine_dai_dma_data),
+	priv->dma_params = devm_kcalloc(&pdev->dev,
+			2, sizeof(struct snd_dmaengine_dai_dma_data),
 			GFP_KERNEL);
 	if (priv->dma_params == NULL)
 		return -ENOMEM;
@@ -482,3 +482,4 @@ module_platform_driver(asoc_mmp_sspa_driver);
 MODULE_AUTHOR("Leo Yan <leoy@marvell.com>");
 MODULE_DESCRIPTION("MMP SSPA SoC Interface");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:mmp-sspa-dai");

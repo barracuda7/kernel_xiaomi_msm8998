@@ -127,13 +127,13 @@ void ath9k_hw_read_array(struct ath_hw *ah, u32 array[][2], int size)
 	u32 *tmp_reg_list, *tmp_data;
 	int i;
 
-	tmp_reg_list = kmalloc(size * sizeof(u32), GFP_KERNEL);
+	tmp_reg_list = kmalloc_array(size, sizeof(u32), GFP_KERNEL);
 	if (!tmp_reg_list) {
 		dev_err(ah->dev, "%s: tmp_reg_list: alloc filed\n", __func__);
 		return;
 	}
 
-	tmp_data = kmalloc(size * sizeof(u32), GFP_KERNEL);
+	tmp_data = kmalloc_array(size, sizeof(u32), GFP_KERNEL);
 	if (!tmp_data) {
 		dev_err(ah->dev, "%s tmp_data: alloc filed\n", __func__);
 		goto error_tmp_data;
@@ -1594,6 +1594,10 @@ bool ath9k_hw_check_alive(struct ath_hw *ah)
 {
 	int count = 50;
 	u32 reg, last_val;
+
+	/* Check if chip failed to wake up */
+	if (REG_READ(ah, AR_CFG) == 0xdeadbeef)
+		return false;
 
 	if (AR_SREV_9300(ah))
 		return !ath9k_hw_detect_mac_hang(ah);

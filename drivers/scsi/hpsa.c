@@ -1766,8 +1766,8 @@ static void adjust_hpsa_scsi_table(struct ctlr_info *h,
 		return;
 	}
 
-	added = kzalloc(sizeof(*added) * HPSA_MAX_DEVICES, GFP_KERNEL);
-	removed = kzalloc(sizeof(*removed) * HPSA_MAX_DEVICES, GFP_KERNEL);
+	added = kcalloc(HPSA_MAX_DEVICES, sizeof(*added), GFP_KERNEL);
+	removed = kcalloc(HPSA_MAX_DEVICES, sizeof(*removed), GFP_KERNEL);
 
 	if (!added || !removed) {
 		dev_warn(&h->pdev->dev, "out of memory in "
@@ -2005,14 +2005,15 @@ static int hpsa_allocate_ioaccel2_sg_chain_blocks(struct ctlr_info *h)
 		return 0;
 
 	h->ioaccel2_cmd_sg_list =
-		kzalloc(sizeof(*h->ioaccel2_cmd_sg_list) * h->nr_cmds,
+		kcalloc(h->nr_cmds, sizeof(*h->ioaccel2_cmd_sg_list),
 					GFP_KERNEL);
 	if (!h->ioaccel2_cmd_sg_list)
 		return -ENOMEM;
 	for (i = 0; i < h->nr_cmds; i++) {
 		h->ioaccel2_cmd_sg_list[i] =
-			kmalloc(sizeof(*h->ioaccel2_cmd_sg_list[i]) *
-					h->maxsgentries, GFP_KERNEL);
+			kmalloc_array(h->maxsgentries,
+				      sizeof(*h->ioaccel2_cmd_sg_list[i]),
+				      GFP_KERNEL);
 		if (!h->ioaccel2_cmd_sg_list[i])
 			goto clean;
 	}
@@ -2044,15 +2045,16 @@ static int hpsa_alloc_sg_chain_blocks(struct ctlr_info *h)
 	if (h->chainsize <= 0)
 		return 0;
 
-	h->cmd_sg_list = kzalloc(sizeof(*h->cmd_sg_list) * h->nr_cmds,
-				GFP_KERNEL);
+	h->cmd_sg_list = kcalloc(h->nr_cmds, sizeof(*h->cmd_sg_list),
+				 GFP_KERNEL);
 	if (!h->cmd_sg_list) {
 		dev_err(&h->pdev->dev, "Failed to allocate SG list\n");
 		return -ENOMEM;
 	}
 	for (i = 0; i < h->nr_cmds; i++) {
-		h->cmd_sg_list[i] = kmalloc(sizeof(*h->cmd_sg_list[i]) *
-						h->chainsize, GFP_KERNEL);
+		h->cmd_sg_list[i] = kmalloc_array(h->chainsize,
+						  sizeof(*h->cmd_sg_list[i]),
+						  GFP_KERNEL);
 		if (!h->cmd_sg_list[i]) {
 			dev_err(&h->pdev->dev, "Failed to allocate cmd SG\n");
 			goto clean;
@@ -3466,7 +3468,7 @@ exit_failed:
  *  # (integer code indicating one of several NOT READY states
  *     describing why a volume is to be kept offline)
  */
-static int hpsa_volume_offline(struct ctlr_info *h,
+static unsigned char hpsa_volume_offline(struct ctlr_info *h,
 					unsigned char scsi3addr[])
 {
 	struct CommandList *c;
@@ -3486,7 +3488,7 @@ static int hpsa_volume_offline(struct ctlr_info *h,
 	rc = hpsa_scsi_do_simple_cmd(h, c, DEFAULT_REPLY_QUEUE, NO_TIMEOUT);
 	if (rc) {
 		cmd_free(h, c);
-		return 0;
+		return HPSA_VPD_LV_STATUS_UNSUPPORTED;
 	}
 	sense = c->err_info->SenseInfo;
 	if (c->err_info->SenseLen > sizeof(c->err_info->SenseInfo))
@@ -3497,19 +3499,13 @@ static int hpsa_volume_offline(struct ctlr_info *h,
 	cmd_status = c->err_info->CommandStatus;
 	scsi_status = c->err_info->ScsiStatus;
 	cmd_free(h, c);
-	/* Is the volume 'not ready'? */
-	if (cmd_status != CMD_TARGET_STATUS ||
-		scsi_status != SAM_STAT_CHECK_CONDITION ||
-		sense_key != NOT_READY ||
-		asc != ASC_LUN_NOT_READY)  {
-		return 0;
-	}
 
 	/* Determine the reason for not ready state */
 	ldstat = hpsa_get_volume_status(h, scsi3addr);
 
 	/* Keep volume offline in certain cases: */
 	switch (ldstat) {
+	case HPSA_LV_FAILED:
 	case HPSA_LV_UNDERGOING_ERASE:
 	case HPSA_LV_NOT_AVAILABLE:
 	case HPSA_LV_UNDERGOING_RPI:
@@ -3531,7 +3527,7 @@ static int hpsa_volume_offline(struct ctlr_info *h,
 	default:
 		break;
 	}
-	return 0;
+	return HPSA_LV_OK;
 }
 
 /*
@@ -3615,10 +3611,10 @@ static int hpsa_update_device_info(struct ctlr_info *h,
 	/* Do an inquiry to the device to see what it is. */
 	if (hpsa_scsi_do_inquiry(h, scsi3addr, 0, inq_buff,
 		(unsigned char) OBDR_TAPE_INQ_SIZE) != 0) {
-		/* Inquiry failed (msg printed already) */
 		dev_err(&h->pdev->dev,
-			"hpsa_update_device_info: inquiry failed\n");
-		rc = -EIO;
+			"%s: inquiry failed, device will be skipped.\n",
+			__func__);
+		rc = HPSA_INQUIRY_FAILED;
 		goto bail_out;
 	}
 
@@ -3638,15 +3634,20 @@ static int hpsa_update_device_info(struct ctlr_info *h,
 
 	if (this_device->devtype == TYPE_DISK &&
 		is_logical_dev_addr_mode(scsi3addr)) {
-		int volume_offline;
+		unsigned char volume_offline;
 
 		hpsa_get_raid_level(h, scsi3addr, &this_device->raid_level);
 		if (h->fw_support & MISC_FW_RAID_OFFLOAD_BASIC)
 			hpsa_get_ioaccel_status(h, scsi3addr, this_device);
 		volume_offline = hpsa_volume_offline(h, scsi3addr);
-		if (volume_offline < 0 || volume_offline > 0xff)
-			volume_offline = HPSA_VPD_LV_STATUS_UNSUPPORTED;
-		this_device->volume_offline = volume_offline & 0xff;
+		this_device->volume_offline = volume_offline;
+		if (volume_offline == HPSA_LV_FAILED) {
+			rc = HPSA_LV_FAILED;
+			dev_err(&h->pdev->dev,
+				"%s: LV failed, device will be skipped.\n",
+				__func__);
+			goto bail_out;
+		}
 	} else {
 		this_device->raid_level = RAID_UNKNOWN;
 		this_device->offload_config = 0;
@@ -4022,7 +4023,7 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h)
 	bool physical_device;
 	DECLARE_BITMAP(lunzerobits, MAX_EXT_TARGETS);
 
-	currentsd = kzalloc(sizeof(*currentsd) * HPSA_MAX_DEVICES, GFP_KERNEL);
+	currentsd = kcalloc(HPSA_MAX_DEVICES, sizeof(*currentsd), GFP_KERNEL);
 	physdev_list = kzalloc(sizeof(*physdev_list), GFP_KERNEL);
 	logdev_list = kzalloc(sizeof(*logdev_list), GFP_KERNEL);
 	tmpdevice = kzalloc(sizeof(*tmpdevice), GFP_KERNEL);
@@ -4115,8 +4116,7 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h)
 			goto out;
 		}
 		if (rc) {
-			dev_warn(&h->pdev->dev,
-				"Inquiry failed, skipping device.\n");
+			h->drv_req_rescan = 1;
 			continue;
 		}
 
@@ -5257,7 +5257,7 @@ static void hpsa_scan_complete(struct ctlr_info *h)
 
 	spin_lock_irqsave(&h->scan_lock, flags);
 	h->scan_finished = 1;
-	wake_up_all(&h->scan_wait_queue);
+	wake_up(&h->scan_wait_queue);
 	spin_unlock_irqrestore(&h->scan_lock, flags);
 }
 
@@ -5275,11 +5275,23 @@ static void hpsa_scan_start(struct Scsi_Host *sh)
 	if (unlikely(lockup_detected(h)))
 		return hpsa_scan_complete(h);
 
+	/*
+	 * If a scan is already waiting to run, no need to add another
+	 */
+	spin_lock_irqsave(&h->scan_lock, flags);
+	if (h->scan_waiting) {
+		spin_unlock_irqrestore(&h->scan_lock, flags);
+		return;
+	}
+
+	spin_unlock_irqrestore(&h->scan_lock, flags);
+
 	/* wait until any scan already in progress is finished. */
 	while (1) {
 		spin_lock_irqsave(&h->scan_lock, flags);
 		if (h->scan_finished)
 			break;
+		h->scan_waiting = 1;
 		spin_unlock_irqrestore(&h->scan_lock, flags);
 		wait_event(h->scan_wait_queue, h->scan_finished);
 		/* Note: We don't need to worry about a race between this
@@ -5289,6 +5301,7 @@ static void hpsa_scan_start(struct Scsi_Host *sh)
 		 */
 	}
 	h->scan_finished = 0; /* mark scan as in progress */
+	h->scan_waiting = 0;
 	spin_unlock_irqrestore(&h->scan_lock, flags);
 
 	if (unlikely(lockup_detected(h)))
@@ -6403,12 +6416,12 @@ static int hpsa_big_passthru_ioctl(struct ctlr_info *h, void __user *argp)
 		status = -EINVAL;
 		goto cleanup1;
 	}
-	buff = kzalloc(SG_ENTRIES_IN_CMD * sizeof(char *), GFP_KERNEL);
+	buff = kcalloc(SG_ENTRIES_IN_CMD, sizeof(char *), GFP_KERNEL);
 	if (!buff) {
 		status = -ENOMEM;
 		goto cleanup1;
 	}
-	buff_size = kmalloc(SG_ENTRIES_IN_CMD * sizeof(int), GFP_KERNEL);
+	buff_size = kmalloc_array(SG_ENTRIES_IN_CMD, sizeof(int), GFP_KERNEL);
 	if (!buff_size) {
 		status = -ENOMEM;
 		goto cleanup1;
@@ -7153,7 +7166,7 @@ static int controller_reset_failed(struct CfgTable __iomem *cfgtable)
 	char *driver_ver, *old_driver_ver;
 	int rc, size = sizeof(cfgtable->driver_version);
 
-	old_driver_ver = kmalloc(2 * size, GFP_KERNEL);
+	old_driver_ver = kmalloc_array(2, size, GFP_KERNEL);
 	if (!old_driver_ver)
 		return -ENOMEM;
 	driver_ver = old_driver_ver + size;
@@ -7926,9 +7939,9 @@ static void hpsa_free_cmd_pool(struct ctlr_info *h)
 
 static int hpsa_alloc_cmd_pool(struct ctlr_info *h)
 {
-	h->cmd_pool_bits = kzalloc(
-		DIV_ROUND_UP(h->nr_cmds, BITS_PER_LONG) *
-		sizeof(unsigned long), GFP_KERNEL);
+	h->cmd_pool_bits = kcalloc(DIV_ROUND_UP(h->nr_cmds, BITS_PER_LONG),
+				   sizeof(unsigned long),
+				   GFP_KERNEL);
 	h->cmd_pool = pci_alloc_consistent(h->pdev,
 		    h->nr_cmds * sizeof(*h->cmd_pool),
 		    &(h->cmd_pool_dhandle));
@@ -8505,6 +8518,7 @@ reinit_after_soft_reset:
 	init_waitqueue_head(&h->event_sync_wait_queue);
 	mutex_init(&h->reset_mutex);
 	h->scan_finished = 1; /* no scan currently in progress */
+	h->scan_waiting = 0;
 
 	pci_set_drvdata(pdev, h);
 	h->ndevices = 0;
@@ -8797,6 +8811,8 @@ static void hpsa_remove_one(struct pci_dev *pdev)
 	destroy_workqueue(h->rescan_ctlr_wq);
 	destroy_workqueue(h->resubmit_wq);
 
+	hpsa_delete_sas_host(h);
+
 	/*
 	 * Call before disabling interrupts.
 	 * scsi_remove_host can trigger I/O operations especially
@@ -8830,8 +8846,6 @@ static void hpsa_remove_one(struct pci_dev *pdev)
 	free_percpu(h->lockup_detected);		/* init_one 2 */
 	h->lockup_detected = NULL;			/* init_one 2 */
 	/* (void) pci_disable_pcie_error_reporting(pdev); */	/* init_one 1 */
-
-	hpsa_delete_sas_host(h);
 
 	kfree(h);					/* init_one 1 */
 }
@@ -9324,9 +9338,9 @@ static void hpsa_free_sas_phy(struct hpsa_sas_phy *hpsa_sas_phy)
 	struct sas_phy *phy = hpsa_sas_phy->phy;
 
 	sas_port_delete_phy(hpsa_sas_phy->parent_port->port, phy);
-	sas_phy_free(phy);
 	if (hpsa_sas_phy->added_to_port)
 		list_del(&hpsa_sas_phy->phy_list_entry);
+	sas_phy_delete(phy);
 	kfree(hpsa_sas_phy);
 }
 

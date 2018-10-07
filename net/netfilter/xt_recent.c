@@ -185,8 +185,7 @@ recent_entry_init(struct recent_table *t, const union nf_inet_addr *addr,
 	}
 
 	nstamps_max += 1;
-	e = kmalloc(sizeof(*e) + sizeof(e->stamps[0]) * nstamps_max,
-		    GFP_ATOMIC);
+	e = kmalloc(struct_size(e, stamps, nstamps_max), GFP_ATOMIC);
 	if (e == NULL)
 		return NULL;
 	memcpy(&e->addr, addr, sizeof(e->addr));
@@ -364,9 +363,9 @@ static int recent_mt_check(const struct xt_mtchk_param *par,
 			info->hit_count, XT_RECENT_MAX_NSTAMPS - 1);
 		return -EINVAL;
 	}
-	if (info->name[0] == '\0' ||
-	    strnlen(info->name, XT_RECENT_NAME_LEN) == XT_RECENT_NAME_LEN)
-		return -EINVAL;
+	ret = xt_check_proc_name(info->name, sizeof(info->name));
+	if (ret)
+		return ret;
 
 	if (ip_pkt_list_tot && info->hit_count < ip_pkt_list_tot)
 		nstamp_mask = roundup_pow_of_two(ip_pkt_list_tot) - 1;

@@ -663,7 +663,7 @@ static struct irq_chip its_irq_chip = {
  * This gives us (((1UL << id_bits) - 8192) >> 5) possible allocations.
  */
 #define IRQS_PER_CHUNK_SHIFT	5
-#define IRQS_PER_CHUNK		(1 << IRQS_PER_CHUNK_SHIFT)
+#define IRQS_PER_CHUNK		(1UL << IRQS_PER_CHUNK_SHIFT)
 
 static unsigned long *lpi_bitmap;
 static u32 lpi_chunks;
@@ -683,7 +683,7 @@ static int its_lpi_init(u32 id_bits)
 {
 	lpi_chunks = its_lpi_to_chunk(1UL << id_bits);
 
-	lpi_bitmap = kzalloc(BITS_TO_LONGS(lpi_chunks) * sizeof(long),
+	lpi_bitmap = kcalloc(BITS_TO_LONGS(lpi_chunks), sizeof(long),
 			     GFP_KERNEL);
 	if (!lpi_bitmap) {
 		lpi_chunks = 0;
@@ -717,7 +717,8 @@ static unsigned long *its_lpi_alloc_chunks(int nr_irqs, int *base, int *nr_ids)
 	if (!nr_chunks)
 		goto out;
 
-	bitmap = kzalloc(BITS_TO_LONGS(nr_chunks * IRQS_PER_CHUNK) * sizeof (long),
+	bitmap = kcalloc(BITS_TO_LONGS(nr_chunks * IRQS_PER_CHUNK),
+			 sizeof(long),
 			 GFP_ATOMIC);
 	if (!bitmap)
 		goto out;
@@ -982,7 +983,7 @@ out_free:
 
 static int its_alloc_collections(struct its_node *its)
 {
-	its->collections = kzalloc(nr_cpu_ids * sizeof(*its->collections),
+	its->collections = kcalloc(nr_cpu_ids, sizeof(*its->collections),
 				   GFP_KERNEL);
 	if (!its->collections)
 		return -ENOMEM;
@@ -1168,17 +1169,16 @@ static struct its_device *its_create_device(struct its_node *its, u32 dev_id,
 
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	/*
-	 * At least one bit of EventID is being used, hence a minimum
-	 * of two entries. No, the architecture doesn't let you
-	 * express an ITT with a single entry.
+	 * We allocate at least one chunk worth of LPIs bet device,
+	 * and thus that many ITEs. The device may require less though.
 	 */
-	nr_ites = max(2UL, roundup_pow_of_two(nvecs));
+	nr_ites = max(IRQS_PER_CHUNK, roundup_pow_of_two(nvecs));
 	sz = nr_ites * its->ite_size;
 	sz = max(sz, ITS_ITT_ALIGN) + ITS_ITT_ALIGN - 1;
 	itt = kzalloc(sz, GFP_KERNEL);
 	lpi_map = its_lpi_alloc_chunks(nvecs, &lpi_base, &nr_lpis);
 	if (lpi_map)
-		col_map = kzalloc(sizeof(*col_map) * nr_lpis, GFP_KERNEL);
+		col_map = kcalloc(nr_lpis, sizeof(*col_map), GFP_KERNEL);
 
 	if (!dev || !itt || !lpi_map || !col_map) {
 		kfree(dev);

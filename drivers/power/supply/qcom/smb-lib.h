@@ -65,10 +65,7 @@ enum print_reason {
 #define OTG_DELAY_VOTER			"OTG_DELAY_VOTER"
 #define USBIN_I_VOTER			"USBIN_I_VOTER"
 #define WEAK_CHARGER_VOTER		"WEAK_CHARGER_VOTER"
-
-#ifdef CONFIG_MACH_XIAOMI_MSM8998
-#define FB_SCREEN_VOTER			"FB_SCREEN_VOTER"
-#endif
+#define OV_VOTER			"OV_VOTER"
 
 #define VCONN_MAX_ATTEMPTS	3
 #define OTG_MAX_ATTEMPTS	3
@@ -87,6 +84,7 @@ enum {
 	TYPEC_CC2_REMOVAL_WA_BIT	= BIT(2),
 	QC_AUTH_INTERRUPT_WA_BIT	= BIT(3),
 	OTG_WA				= BIT(4),
+	OV_IRQ_WA_BIT			= BIT(5),
 };
 
 enum smb_irq_index {
@@ -260,9 +258,6 @@ struct smb_charger {
 
 	/* notifiers */
 	struct notifier_block	nb;
-#ifdef CONFIG_MACH_XIAOMI_MSM8998
-	struct notifier_block	fb_state_notifier;
-#endif
 
 	/* parallel charging */
 	struct parallel_params	pl;
@@ -305,9 +300,6 @@ struct smb_charger {
 	struct work_struct	legacy_detection_work;
 	struct delayed_work	uusb_otg_work;
 	struct delayed_work	bb_removal_work;
-#ifdef CONFIG_MACH_XIAOMI_MSM8998
-	struct delayed_work	fb_state_work;
-#endif
 
 	/* cached status */
 	int			voltage_min_uv;
@@ -317,13 +309,7 @@ struct smb_charger {
 	int			boost_threshold_ua;
 	int			system_temp_level;
 	int			thermal_levels;
-#ifdef CONFIG_MACH_XIAOMI_MSM8998
-	int			*thermal_mitigation_dcp;
-	int			*thermal_mitigation_qc3;
-	int			*thermal_mitigation_qc2;
-#else
 	int			*thermal_mitigation;
-#endif
 	int			dcp_icl_ua;
 	int			fake_capacity;
 	bool			step_chg_enabled;
@@ -351,9 +337,6 @@ struct smb_charger {
 	u8			float_cfg;
 	bool			use_extcon;
 	bool			otg_present;
-#ifdef CONFIG_MACH_XIAOMI_MSM8998
-	bool			screen_on;
-#endif
 
 	/* workaround flag */
 	u32			wa_flags;
@@ -449,6 +432,8 @@ int smblib_get_prop_batt_current_now(struct smb_charger *chg,
 int smblib_get_prop_batt_temp(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_batt_charge_counter(struct smb_charger *chg,
+				union power_supply_propval *val);
+int smblib_get_prop_batt_charge_full(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_set_prop_input_suspend(struct smb_charger *chg,
 				const union power_supply_propval *val);

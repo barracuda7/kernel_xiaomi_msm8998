@@ -660,8 +660,8 @@ static struct sbridge_dev *alloc_sbridge_dev(u8 bus,
 	if (!sbridge_dev)
 		return NULL;
 
-	sbridge_dev->pdev = kzalloc(sizeof(*sbridge_dev->pdev) * table->n_devs,
-				   GFP_KERNEL);
+	sbridge_dev->pdev = kcalloc(table->n_devs, sizeof(*sbridge_dev->pdev),
+				    GFP_KERNEL);
 	if (!sbridge_dev->pdev) {
 		kfree(sbridge_dev);
 		return NULL;
@@ -1773,6 +1773,7 @@ static int ibridge_mci_bind_devs(struct mem_ctl_info *mci,
 			break;
 		case PCI_DEVICE_ID_INTEL_IBRIDGE_IMC_HA0_TA:
 			pvt->pci_ta = pdev;
+			break;
 		case PCI_DEVICE_ID_INTEL_IBRIDGE_IMC_HA0_RAS:
 			pvt->pci_ras = pdev;
 			break;

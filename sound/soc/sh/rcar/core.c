@@ -192,19 +192,16 @@ void rsnd_mod_interrupt(struct rsnd_mod *mod,
 	struct rsnd_priv *priv = rsnd_mod_to_priv(mod);
 	struct rsnd_dai_stream *io;
 	struct rsnd_dai *rdai;
-	int i, j;
+	int i;
 
-	for_each_rsnd_dai(rdai, priv, j) {
+	for_each_rsnd_dai(rdai, priv, i) {
+		io = &rdai->playback;
+		if (mod == io->mod[mod->type])
+			callback(mod, io);
 
-		for (i = 0; i < RSND_MOD_MAX; i++) {
-			io = &rdai->playback;
-			if (mod == io->mod[i])
-				callback(mod, io);
-
-			io = &rdai->capture;
-			if (mod == io->mod[i])
-				callback(mod, io);
-		}
+		io = &rdai->capture;
+		if (mod == io->mod[mod->type])
+			callback(mod, io);
 	}
 }
 
@@ -748,8 +745,8 @@ static void rsnd_of_parse_dai(struct platform_device *pdev,
 	if (!nr)
 		return;
 
-	dai_info = devm_kzalloc(dev,
-				sizeof(struct rsnd_dai_platform_info) * nr,
+	dai_info = devm_kcalloc(dev,
+				nr, sizeof(struct rsnd_dai_platform_info),
 				GFP_KERNEL);
 	if (!dai_info) {
 		dev_err(dev, "dai info allocation error\n");
@@ -831,8 +828,8 @@ static int rsnd_dai_probe(struct platform_device *pdev,
 		return -EIO;
 	}
 
-	drv  = devm_kzalloc(dev, sizeof(*drv)  * dai_nr, GFP_KERNEL);
-	rdai = devm_kzalloc(dev, sizeof(*rdai) * dai_nr, GFP_KERNEL);
+	drv  = devm_kcalloc(dev, dai_nr, sizeof(*drv), GFP_KERNEL);
+	rdai = devm_kcalloc(dev, dai_nr, sizeof(*rdai), GFP_KERNEL);
 	if (!drv || !rdai) {
 		dev_err(dev, "dai allocate failed\n");
 		return -ENOMEM;
@@ -1019,7 +1016,7 @@ static int rsnd_kctrl_put(struct snd_kcontrol *kctrl,
 		}
 	}
 
-	if (change)
+	if (change && cfg->update)
 		cfg->update(cfg->io, mod);
 
 	return change;
@@ -1052,10 +1049,8 @@ static int __rsnd_kctrl_new(struct rsnd_mod *mod,
 		return -ENOMEM;
 
 	ret = snd_ctl_add(card, kctrl);
-	if (ret < 0) {
-		snd_ctl_free_one(kctrl);
+	if (ret < 0)
 		return ret;
-	}
 
 	cfg->update = update;
 	cfg->card = card;

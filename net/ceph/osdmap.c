@@ -295,6 +295,7 @@ static struct crush_map *crush_decode(void *pbyval, void *end)
 		u32 yes;
 		struct crush_rule *r;
 
+		err = -EINVAL;
 		ceph_decode_32_safe(p, end, yes, bad);
 		if (!yes) {
 			dout("crush_decode NO rule %d off %x %p to %p\n",
@@ -974,8 +975,9 @@ static int set_primary_affinity(struct ceph_osdmap *map, int osd, u32 aff)
 	if (!map->osd_primary_affinity) {
 		int i;
 
-		map->osd_primary_affinity = kmalloc(map->max_osd*sizeof(u32),
-						    GFP_NOFS);
+		map->osd_primary_affinity = kmalloc_array(map->max_osd,
+							  sizeof(u32),
+							  GFP_NOFS);
 		if (!map->osd_primary_affinity)
 			return -ENOMEM;
 

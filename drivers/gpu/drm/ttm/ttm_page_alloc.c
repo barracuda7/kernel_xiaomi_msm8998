@@ -315,8 +315,9 @@ static int ttm_page_pool_free(struct ttm_page_pool *pool, unsigned nr_free,
 	if (use_static)
 		pages_to_free = static_buf;
 	else
-		pages_to_free = kmalloc(npages_to_free * sizeof(struct page *),
-					GFP_KERNEL);
+		pages_to_free = kmalloc_array(npages_to_free,
+					      sizeof(struct page *),
+					      GFP_KERNEL);
 	if (!pages_to_free) {
 		pr_err("Failed to allocate memory for pool free operation\n");
 		return 0;
@@ -501,7 +502,8 @@ static int ttm_alloc_new_pages(struct list_head *pages, gfp_t gfp_flags,
 			(unsigned)(PAGE_SIZE/sizeof(struct page *)));
 
 	/* allocate array for page caching change */
-	caching_array = kmalloc(max_cpages*sizeof(struct page *), GFP_KERNEL);
+	caching_array = kmalloc_array(max_cpages, sizeof(struct page *),
+				      GFP_KERNEL);
 
 	if (!caching_array) {
 		pr_err("Unable to allocate table for new pages\n");
@@ -612,7 +614,7 @@ static void ttm_page_pool_fill_locked(struct ttm_page_pool *pool,
 		} else {
 			pr_err("Failed to fill pool (%p)\n", pool);
 			/* If we have any pages left put them to the pool. */
-			list_for_each_entry(p, &pool->list, lru) {
+			list_for_each_entry(p, &new_pages, lru) {
 				++cpages;
 			}
 			list_splice(&new_pages, &pool->list);
@@ -818,6 +820,8 @@ int ttm_page_alloc_init(struct ttm_mem_global *glob, unsigned max_pages)
 	pr_info("Initializing pool allocator\n");
 
 	_manager = kzalloc(sizeof(*_manager), GFP_KERNEL);
+	if (!_manager)
+		return -ENOMEM;
 
 	ttm_page_pool_init_locked(&_manager->wc_pool, GFP_HIGHUSER, "wc");
 

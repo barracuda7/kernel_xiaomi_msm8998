@@ -298,8 +298,11 @@ static void *qp_alloc_queue(u64 size, u32 flags)
 	size_t pas_size;
 	size_t vas_size;
 	size_t queue_size = sizeof(*queue) + sizeof(*queue->kernel_if);
-	const u64 num_pages = DIV_ROUND_UP(size, PAGE_SIZE) + 1;
+	u64 num_pages;
 
+	if (size > SIZE_MAX - PAGE_SIZE)
+		return NULL;
+	num_pages = DIV_ROUND_UP(size, PAGE_SIZE) + 1;
 	if (num_pages >
 		 (SIZE_MAX - queue_size) /
 		 (sizeof(*queue->kernel_if->u.g.pas) +
@@ -487,12 +490,14 @@ static int qp_alloc_ppn_set(void *prod_q,
 		return VMCI_ERROR_ALREADY_EXISTS;
 
 	produce_ppns =
-	    kmalloc(num_produce_pages * sizeof(*produce_ppns), GFP_KERNEL);
+	    kmalloc_array(num_produce_pages, sizeof(*produce_ppns),
+			  GFP_KERNEL);
 	if (!produce_ppns)
 		return VMCI_ERROR_NO_MEM;
 
 	consume_ppns =
-	    kmalloc(num_consume_pages * sizeof(*consume_ppns), GFP_KERNEL);
+	    kmalloc_array(num_consume_pages, sizeof(*consume_ppns),
+			  GFP_KERNEL);
 	if (!consume_ppns) {
 		kfree(produce_ppns);
 		return VMCI_ERROR_NO_MEM;
@@ -624,9 +629,12 @@ static struct vmci_queue *qp_host_alloc_queue(u64 size)
 {
 	struct vmci_queue *queue;
 	size_t queue_page_size;
-	const u64 num_pages = DIV_ROUND_UP(size, PAGE_SIZE) + 1;
+	u64 num_pages;
 	const size_t queue_size = sizeof(*queue) + sizeof(*(queue->kernel_if));
 
+	if (size > SIZE_MAX - PAGE_SIZE)
+		return NULL;
+	num_pages = DIV_ROUND_UP(size, PAGE_SIZE) + 1;
 	if (num_pages > (SIZE_MAX - queue_size) /
 		 sizeof(*queue->kernel_if->u.h.page))
 		return NULL;

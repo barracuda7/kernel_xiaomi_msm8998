@@ -2431,8 +2431,8 @@ static const struct mxt_platform_data *mxt_parse_dt(struct i2c_client *client)
 	if (of_find_property(np, "linux,gpio-keymap", &proplen)) {
 		pdata->t19_num_keys = proplen / sizeof(u32);
 
-		keymap = devm_kzalloc(&client->dev,
-				pdata->t19_num_keys * sizeof(keymap[0]),
+		keymap = devm_kcalloc(&client->dev,
+				pdata->t19_num_keys, sizeof(keymap[0]),
 				GFP_KERNEL);
 		if (!keymap)
 			return ERR_PTR(-ENOMEM);
@@ -2519,6 +2519,15 @@ static const struct dmi_system_id mxt_dmi_table[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "GOOGLE"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "Samus"),
+		},
+		.driver_data = samus_platform_data,
+	},
+	{
+		/* Samsung Chromebook Pro */
+		.ident = "Samsung Chromebook Pro",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Google"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Caroline"),
 		},
 		.driver_data = samus_platform_data,
 	},

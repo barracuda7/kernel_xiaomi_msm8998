@@ -809,10 +809,9 @@ static int c4iw_rdev_open(struct c4iw_rdev *rdev)
 	     rdev->lldi.vr->qp.size,
 	     rdev->lldi.vr->cq.start,
 	     rdev->lldi.vr->cq.size);
-	PDBG("udb len 0x%x udb base %p db_reg %p gts_reg %p "
+	PDBG("udb %pR db_reg %p gts_reg %p "
 	     "qpmask 0x%x cqmask 0x%x\n",
-	     (unsigned)pci_resource_len(rdev->lldi.pdev, 2),
-	     (void *)pci_resource_start(rdev->lldi.pdev, 2),
+		&rdev->lldi.pdev->resource[2],
 	     rdev->lldi.db_reg, rdev->lldi.gts_reg,
 	     rdev->qpmask, rdev->cqmask);
 
@@ -856,8 +855,9 @@ static int c4iw_rdev_open(struct c4iw_rdev *rdev)
 	}
 
 	if (c4iw_wr_log) {
-		rdev->wr_log = kzalloc((1 << c4iw_wr_log_size_order) *
-				       sizeof(*rdev->wr_log), GFP_KERNEL);
+		rdev->wr_log = kcalloc(1 << c4iw_wr_log_size_order,
+				       sizeof(*rdev->wr_log),
+				       GFP_KERNEL);
 		if (rdev->wr_log) {
 			rdev->wr_log_size = 1 << c4iw_wr_log_size_order;
 			atomic_set(&rdev->wr_log_idx, 0);
@@ -1436,7 +1436,7 @@ static void recover_queues(struct uld_ctx *ctx)
 	ctx->dev->db_state = RECOVERY;
 	idr_for_each(&ctx->dev->qpidr, count_qps, &count);
 
-	qp_list.qps = kzalloc(count * sizeof *qp_list.qps, GFP_ATOMIC);
+	qp_list.qps = kcalloc(count, sizeof(*qp_list.qps), GFP_ATOMIC);
 	if (!qp_list.qps) {
 		printk(KERN_ERR MOD "%s: Fatal error - DB overflow recovery failed\n",
 		       pci_name(ctx->lldi.pdev));

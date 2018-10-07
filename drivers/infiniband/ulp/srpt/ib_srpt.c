@@ -671,7 +671,7 @@ static struct srpt_ioctx **srpt_alloc_ioctx_ring(struct srpt_device *sdev,
 	WARN_ON(ioctx_size != sizeof(struct srpt_recv_ioctx)
 		&& ioctx_size != sizeof(struct srpt_send_ioctx));
 
-	ring = kmalloc(ring_size * sizeof(ring[0]), GFP_KERNEL);
+	ring = kmalloc_array(ring_size, sizeof(ring[0]), GFP_KERNEL);
 	if (!ring)
 		goto out;
 	for (i = 0; i < ring_size; ++i) {
@@ -925,7 +925,8 @@ static int srpt_get_desc_tbl(struct srpt_send_ioctx *ioctx,
 			ioctx->rbufs = &ioctx->single_rbuf;
 		else {
 			ioctx->rbufs =
-				kmalloc(ioctx->n_rbuf * sizeof *db, GFP_ATOMIC);
+				kmalloc_array(ioctx->n_rbuf, sizeof(*db),
+					      GFP_ATOMIC);
 			if (!ioctx->rbufs) {
 				ioctx->n_rbuf = 0;
 				ret = -ENOMEM;
@@ -957,8 +958,7 @@ static int srpt_init_ch_qp(struct srpt_rdma_ch *ch, struct ib_qp *qp)
 		return -ENOMEM;
 
 	attr->qp_state = IB_QPS_INIT;
-	attr->qp_access_flags = IB_ACCESS_LOCAL_WRITE | IB_ACCESS_REMOTE_READ |
-	    IB_ACCESS_REMOTE_WRITE;
+	attr->qp_access_flags = IB_ACCESS_LOCAL_WRITE;
 	attr->port_num = ch->sport->port;
 	attr->pkey_index = 0;
 
@@ -1115,7 +1115,7 @@ static int srpt_map_sg_to_ib_sge(struct srpt_rdma_ch *ch,
 		nrdma = (count + SRPT_DEF_SG_PER_WQE - 1) / SRPT_DEF_SG_PER_WQE
 			+ ioctx->n_rbuf;
 
-		ioctx->rdma_ius = kzalloc(nrdma * sizeof *riu, GFP_KERNEL);
+		ioctx->rdma_ius = kcalloc(nrdma, sizeof(*riu), GFP_KERNEL);
 		if (!ioctx->rdma_ius)
 			goto free_mem;
 
@@ -1170,8 +1170,9 @@ static int srpt_map_sg_to_ib_sge(struct srpt_rdma_ch *ch,
 			if (rsize > 0 && riu->sge_cnt == SRPT_DEF_SG_PER_WQE) {
 				++ioctx->n_rdma;
 				riu->sge =
-				    kmalloc(riu->sge_cnt * sizeof *riu->sge,
-					    GFP_KERNEL);
+				    kmalloc_array(riu->sge_cnt,
+						  sizeof(*riu->sge),
+						  GFP_KERNEL);
 				if (!riu->sge)
 					goto free_mem;
 
@@ -1183,8 +1184,8 @@ static int srpt_map_sg_to_ib_sge(struct srpt_rdma_ch *ch,
 		}
 
 		++ioctx->n_rdma;
-		riu->sge = kmalloc(riu->sge_cnt * sizeof *riu->sge,
-				   GFP_KERNEL);
+		riu->sge = kmalloc_array(riu->sge_cnt, sizeof(*riu->sge),
+					 GFP_KERNEL);
 		if (!riu->sge)
 			goto free_mem;
 	}
@@ -2975,12 +2976,8 @@ static void srpt_queue_response(struct se_cmd *cmd)
 	}
 	spin_unlock_irqrestore(&ioctx->spinlock, flags);
 
-	if (unlikely(transport_check_aborted_status(&ioctx->cmd, false)
-		     || WARN_ON_ONCE(state == SRPT_STATE_CMD_RSP_SENT))) {
-		atomic_inc(&ch->req_lim_delta);
-		srpt_abort_cmd(ioctx);
+	if (unlikely(WARN_ON_ONCE(state == SRPT_STATE_CMD_RSP_SENT)))
 		return;
-	}
 
 	dir = ioctx->cmd.data_direction;
 
@@ -3425,7 +3422,7 @@ static int srpt_parse_i_port_id(u8 i_port_id[16], const char *name)
 {
 	const char *p;
 	unsigned len, count, leading_zero_bytes;
-	int ret, rc;
+	int ret;
 
 	p = name;
 	if (strncasecmp(p, "0x", 2) == 0)
@@ -3437,10 +3434,9 @@ static int srpt_parse_i_port_id(u8 i_port_id[16], const char *name)
 	count = min(len / 2, 16U);
 	leading_zero_bytes = 16 - count;
 	memset(i_port_id, 0, leading_zero_bytes);
-	rc = hex2bin(i_port_id + leading_zero_bytes, p, count);
-	if (rc < 0)
-		pr_debug("hex2bin failed for srpt_parse_i_port_id: %d\n", rc);
-	ret = 0;
+	ret = hex2bin(i_port_id + leading_zero_bytes, p, count);
+	if (ret < 0)
+		pr_debug("hex2bin failed for srpt_parse_i_port_id: %d\n", ret);
 out:
 	return ret;
 }

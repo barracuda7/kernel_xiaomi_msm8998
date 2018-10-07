@@ -240,6 +240,8 @@ nvkm_vm_unmap_pgt(struct nvkm_vm *vm, int big, u32 fpde, u32 lpde)
 			mmu->func->map_pgt(vpgd->obj, pde, vpgt->mem);
 		}
 
+		mmu->func->flush(vm);
+
 		nvkm_memory_del(&pgt);
 	}
 }
@@ -379,7 +381,7 @@ nvkm_vm_create(struct nvkm_mmu *mmu, u64 offset, u64 length, u64 mm_offset,
 	vm->fpde = offset >> (mmu->func->pgt_bits + 12);
 	vm->lpde = (offset + length - 1) >> (mmu->func->pgt_bits + 12);
 
-	vm->pgt  = vzalloc((vm->lpde - vm->fpde + 1) * sizeof(*vm->pgt));
+	vm->pgt  = vzalloc(array_size(sizeof(*vm->pgt), (vm->lpde - vm->fpde + 1)));
 	if (!vm->pgt) {
 		kfree(vm);
 		return -ENOMEM;

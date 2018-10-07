@@ -100,7 +100,7 @@ static int asoc_simple_card_hw_params(struct snd_pcm_substream *substream,
 		if (ret && ret != -ENOTSUPP)
 			goto err;
 	}
-
+	return 0;
 err:
 	return ret;
 }
@@ -343,13 +343,19 @@ static int asoc_simple_card_dai_link_of(struct device_node *node,
 	snprintf(prop, sizeof(prop), "%scpu", prefix);
 	cpu = of_get_child_by_name(node, prop);
 
+	if (!cpu) {
+		ret = -EINVAL;
+		dev_err(dev, "%s: Can't find %s DT node\n", __func__, prop);
+		goto dai_link_of_err;
+	}
+
 	snprintf(prop, sizeof(prop), "%splat", prefix);
 	plat = of_get_child_by_name(node, prop);
 
 	snprintf(prop, sizeof(prop), "%scodec", prefix);
 	codec = of_get_child_by_name(node, prop);
 
-	if (!cpu || !codec) {
+	if (!codec) {
 		ret = -EINVAL;
 		dev_err(dev, "%s: Can't find %s DT node\n", __func__, prop);
 		goto dai_link_of_err;
@@ -545,8 +551,8 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 
 	/* Allocate the private data and the DAI link array */
 	priv = devm_kzalloc(dev,
-			sizeof(*priv) + sizeof(*dai_link) * num_links,
-			GFP_KERNEL);
+			    struct_size(priv, dai_link, num_links),
+			    GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
@@ -561,8 +567,8 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 	priv->gpio_mic_det = -ENOENT;
 
 	/* Get room for the other properties */
-	priv->dai_props = devm_kzalloc(dev,
-			sizeof(*priv->dai_props) * num_links,
+	priv->dai_props = devm_kcalloc(dev,
+			num_links, sizeof(*priv->dai_props),
 			GFP_KERNEL);
 	if (!priv->dai_props)
 		return -ENOMEM;

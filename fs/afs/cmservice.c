@@ -115,6 +115,9 @@ bool afs_cm_incoming_call(struct afs_call *call)
 	case CBProbe:
 		call->type = &afs_SRXCBProbe;
 		return true;
+	case CBProbeUuid:
+		call->type = &afs_SRXCBProbeUuid;
+		return true;
 	case CBTellMeAboutYourself:
 		call->type = &afs_SRXCBTellMeAboutYourself;
 		return true;
@@ -200,7 +203,8 @@ static int afs_deliver_cb_callback(struct afs_call *call, struct sk_buff *skb,
 		if (call->count > AFSCBMAX)
 			return -EBADMSG;
 
-		call->buffer = kmalloc(call->count * 3 * 4, GFP_KERNEL);
+		call->buffer = kmalloc(array3_size(call->count, 3, 4),
+				       GFP_KERNEL);
 		if (!call->buffer)
 			return -ENOMEM;
 		call->offset = 0;
@@ -468,7 +472,7 @@ static int afs_deliver_cb_probe_uuid(struct afs_call *call, struct sk_buff *skb,
 	switch (call->unmarshall) {
 	case 0:
 		call->offset = 0;
-		call->buffer = kmalloc(11 * sizeof(__be32), GFP_KERNEL);
+		call->buffer = kmalloc_array(11, sizeof(__be32), GFP_KERNEL);
 		if (!call->buffer)
 			return -ENOMEM;
 		call->unmarshall++;

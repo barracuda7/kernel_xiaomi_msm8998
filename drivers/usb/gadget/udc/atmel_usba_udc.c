@@ -28,6 +28,8 @@
 #include <asm/gpio.h>
 
 #include "atmel_usba_udc.h"
+#define USBA_VBUS_IRQFLAGS (IRQF_ONESHOT \
+			   | IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING)
 
 #ifdef CONFIG_USB_GADGET_DEBUG_FS
 #include <linux/debugfs.h>
@@ -1949,7 +1951,7 @@ static struct usba_ep * atmel_udc_of_init(struct platform_device *pdev,
 	while ((pp = of_get_next_child(np, pp)))
 		udc->num_ep++;
 
-	eps = devm_kzalloc(&pdev->dev, sizeof(struct usba_ep) * udc->num_ep,
+	eps = devm_kcalloc(&pdev->dev, udc->num_ep, sizeof(struct usba_ep),
 			   GFP_KERNEL);
 	if (!eps)
 		return ERR_PTR(-ENOMEM);
@@ -2047,7 +2049,7 @@ static struct usba_ep * usba_udc_pdata(struct platform_device *pdev,
 	if (!pdata)
 		return ERR_PTR(-ENXIO);
 
-	eps = devm_kzalloc(&pdev->dev, sizeof(struct usba_ep) * pdata->num_ep,
+	eps = devm_kcalloc(&pdev->dev, pdata->num_ep, sizeof(struct usba_ep),
 			   GFP_KERNEL);
 	if (!eps)
 		return ERR_PTR(-ENOMEM);
@@ -2185,7 +2187,7 @@ static int usba_udc_probe(struct platform_device *pdev)
 					IRQ_NOAUTOEN);
 			ret = devm_request_threaded_irq(&pdev->dev,
 					gpio_to_irq(udc->vbus_pin), NULL,
-					usba_vbus_irq_thread, IRQF_ONESHOT,
+					usba_vbus_irq_thread, USBA_VBUS_IRQFLAGS,
 					"atmel_usba_udc", udc);
 			if (ret) {
 				udc->vbus_pin = -ENODEV;

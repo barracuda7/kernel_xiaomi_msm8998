@@ -1996,7 +1996,7 @@ static void nf_tables_rule_destroy(const struct nft_ctx *ctx,
 	 * is called on error from nf_tables_newrule().
 	 */
 	expr = nft_expr_first(rule);
-	while (expr->ops && expr != nft_expr_last(rule)) {
+	while (expr != nft_expr_last(rule) && expr->ops) {
 		nf_tables_expr_destroy(ctx, expr);
 		expr = nft_expr_next(expr);
 	}
@@ -4595,8 +4595,8 @@ static int __init nf_tables_module_init(void)
 {
 	int err;
 
-	info = kmalloc(sizeof(struct nft_expr_info) * NFT_RULE_MAXEXPRS,
-		       GFP_KERNEL);
+	info = kmalloc_array(NFT_RULE_MAXEXPRS, sizeof(struct nft_expr_info),
+			     GFP_KERNEL);
 	if (info == NULL) {
 		err = -ENOMEM;
 		goto err1;

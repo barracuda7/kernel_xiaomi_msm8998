@@ -546,7 +546,6 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
 					ecomp = &edev->component[components++];
 
 				if (!IS_ERR(ecomp)) {
-					ses_get_power_status(edev, ecomp);
 					if (addl_desc_ptr)
 						ses_process_descriptor(
 							ecomp,
@@ -718,7 +717,7 @@ static int ses_intf_add(struct device *cdev,
 		ses_dev->page10_len = len;
 		buf = NULL;
 	}
-	scomp = kzalloc(sizeof(struct ses_component) * components, GFP_KERNEL);
+	scomp = kcalloc(components, sizeof(struct ses_component), GFP_KERNEL);
 	if (!scomp)
 		goto err_free;
 

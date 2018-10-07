@@ -349,7 +349,7 @@ static struct reiserfs_journal_cnode *allocate_cnodes(int num_cnodes)
 	if (num_cnodes <= 0) {
 		return NULL;
 	}
-	head = vzalloc(num_cnodes * sizeof(struct reiserfs_journal_cnode));
+	head = vzalloc(array_size(num_cnodes, sizeof(struct reiserfs_journal_cnode)));
 	if (!head) {
 		return NULL;
 	}
@@ -1961,7 +1961,7 @@ static int do_journal_release(struct reiserfs_transaction_handle *th,
 	 * will be requeued because superblock is being shutdown and doesn't
 	 * have MS_ACTIVE set.
 	 */
-	cancel_delayed_work_sync(&REISERFS_SB(sb)->old_work);
+	reiserfs_cancel_old_flush(sb);
 	/* wait for all commits to finish */
 	cancel_delayed_work_sync(&SB_JOURNAL(sb)->j_work);
 
@@ -2191,10 +2191,12 @@ static int journal_read_transaction(struct super_block *sb,
 	 * now we know we've got a good transaction, and it was
 	 * inside the valid time ranges
 	 */
-	log_blocks = kmalloc(get_desc_trans_len(desc) *
-			     sizeof(struct buffer_head *), GFP_NOFS);
-	real_blocks = kmalloc(get_desc_trans_len(desc) *
-			      sizeof(struct buffer_head *), GFP_NOFS);
+	log_blocks = kmalloc_array(get_desc_trans_len(desc),
+				   sizeof(struct buffer_head *),
+				   GFP_NOFS);
+	real_blocks = kmalloc_array(get_desc_trans_len(desc),
+				    sizeof(struct buffer_head *),
+				    GFP_NOFS);
 	if (!log_blocks || !real_blocks) {
 		brelse(c_bh);
 		brelse(d_bh);
@@ -2643,7 +2645,7 @@ static int journal_init_dev(struct super_block *super,
 	if (IS_ERR(journal->j_dev_bd)) {
 		result = PTR_ERR(journal->j_dev_bd);
 		journal->j_dev_bd = NULL;
-		reiserfs_warning(super,
+		reiserfs_warning(super, "sh-457",
 				 "journal_init_dev: Cannot open '%s': %i",
 				 jdev_name, result);
 		return result;

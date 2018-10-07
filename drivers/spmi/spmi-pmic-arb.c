@@ -25,7 +25,6 @@
 #include <linux/slab.h>
 #include <linux/spmi.h>
 #include <linux/syscore_ops.h>
-#include <linux/wakeup_reason.h>
 
 /* PMIC Arbiter configuration registers */
 #define PMIC_ARB_VERSION		0x0000
@@ -564,7 +563,6 @@ static void periph_interrupt(struct spmi_pmic_arb *pa, u16 apid, bool show)
 			else if (desc->action && desc->action->name)
 				name = desc->action->name;
 
-			log_base_wakeup_reason(irq);
 			pr_warn("spmi_show_resume_irq: %d triggered [0x%01x, 0x%02x, 0x%01x] %s\n",
 				irq, sid, per, id, name);
 		} else {
@@ -573,7 +571,7 @@ static void periph_interrupt(struct spmi_pmic_arb *pa, u16 apid, bool show)
 	}
 }
 
-static bool __pmic_arb_chained_irq(struct spmi_pmic_arb *pa, bool show)
+static void __pmic_arb_chained_irq(struct spmi_pmic_arb *pa, bool show)
 {
 	int first = pa->min_apid >> 5;
 	int last = pa->max_apid >> 5;
@@ -626,19 +624,16 @@ static bool __pmic_arb_chained_irq(struct spmi_pmic_arb *pa, bool show)
 			}
 		}
 	}
-	return true;
 }
 
-static bool pmic_arb_chained_irq(struct irq_desc *desc)
+static void pmic_arb_chained_irq(struct irq_desc *desc)
 {
 	struct spmi_pmic_arb *pa = irq_desc_get_handler_data(desc);
 	struct irq_chip *chip = irq_desc_get_chip(desc);
-	bool ret;
 
 	chained_irq_enter(chip, desc);
-	ret = __pmic_arb_chained_irq(pa, false);
+	__pmic_arb_chained_irq(pa, false);
 	chained_irq_exit(chip, desc);
-	return ret;
 }
 
 static void qpnpint_irq_ack(struct irq_data *d)

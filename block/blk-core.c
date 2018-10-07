@@ -245,7 +245,7 @@ EXPORT_SYMBOL(blk_start_queue_async);
  **/
 void blk_start_queue(struct request_queue *q)
 {
-	WARN_ON(!irqs_disabled());
+	WARN_ON(!in_interrupt() && !irqs_disabled());
 
 	queue_flag_clear(QUEUE_FLAG_STOPPED, q);
 	__blk_run_queue(q);
@@ -663,21 +663,17 @@ EXPORT_SYMBOL(blk_alloc_queue);
 int blk_queue_enter(struct request_queue *q, gfp_t gfp)
 {
 	while (true) {
-		int ret;
-
 		if (percpu_ref_tryget_live(&q->q_usage_counter))
 			return 0;
 
 		if (!gfpflags_allow_blocking(gfp))
 			return -EBUSY;
 
-		ret = wait_event_interruptible(q->mq_freeze_wq,
-				!atomic_read(&q->mq_freeze_depth) ||
-				blk_queue_dying(q));
+		wait_event(q->mq_freeze_wq,
+			   !atomic_read(&q->mq_freeze_depth) ||
+			   blk_queue_dying(q));
 		if (blk_queue_dying(q))
 			return -ENODEV;
-		if (ret)
-			return ret;
 	}
 }
 
@@ -1268,7 +1264,11 @@ retry:
 	trace_block_sleeprq(q, bio, rw_flags & 1);
 
 	spin_unlock_irq(q->queue_lock);
-	io_schedule();
+	/*
+	 * FIXME: this should be io_schedule().  The timeout is there as a
+	 * workaround for some io timeout problems.
+	 */
+	io_schedule_timeout(5*HZ);
 
 	/*
 	 * After sleeping, we become a "batching" process and will be able

@@ -438,6 +438,9 @@ static int choke_change(struct Qdisc *sch, struct nlattr *opt)
 
 	ctl = nla_data(tb[TCA_CHOKE_PARMS]);
 
+	if (!red_check_params(ctl->qth_min, ctl->qth_max, ctl->Wlog))
+		return -EINVAL;
+
 	if (ctl->limit > CHOKE_MAX_QUEUE)
 		return -EINVAL;
 
@@ -448,7 +451,7 @@ static int choke_change(struct Qdisc *sch, struct nlattr *opt)
 		ntab = kcalloc(mask + 1, sizeof(struct sk_buff *),
 			       GFP_KERNEL | __GFP_NOWARN);
 		if (!ntab)
-			ntab = vzalloc((mask + 1) * sizeof(struct sk_buff *));
+			ntab = vzalloc(array_size(sizeof(struct sk_buff *), (mask + 1)));
 		if (!ntab)
 			return -ENOMEM;
 

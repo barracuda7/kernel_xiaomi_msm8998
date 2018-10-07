@@ -289,10 +289,11 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 
 	prcm_irq_setup = irq_setup;
 
-	prcm_irq_chips = kzalloc(sizeof(void *) * nr_regs, GFP_KERNEL);
-	prcm_irq_setup->saved_mask = kzalloc(sizeof(u32) * nr_regs, GFP_KERNEL);
-	prcm_irq_setup->priority_mask = kzalloc(sizeof(u32) * nr_regs,
-		GFP_KERNEL);
+	prcm_irq_chips = kcalloc(nr_regs, sizeof(void *), GFP_KERNEL);
+	prcm_irq_setup->saved_mask = kcalloc(nr_regs, sizeof(u32),
+					     GFP_KERNEL);
+	prcm_irq_setup->priority_mask = kcalloc(nr_regs, sizeof(u32),
+						GFP_KERNEL);
 
 	if (!prcm_irq_chips || !prcm_irq_setup->saved_mask ||
 	    !prcm_irq_setup->priority_mask) {
@@ -706,7 +707,7 @@ static struct omap_prcm_init_data scrm_data __initdata = {
 };
 #endif
 
-static const struct of_device_id const omap_prcm_dt_match_table[] __initconst = {
+static const struct of_device_id omap_prcm_dt_match_table[] __initconst = {
 #ifdef CONFIG_SOC_AM33XX
 	{ .compatible = "ti,am3-prcm", .data = &am3_prm_data },
 #endif

@@ -258,13 +258,15 @@ static int tipc_nl_compat_dumpit(struct tipc_nl_compat_cmd_dump *cmd,
 	arg = nlmsg_new(0, GFP_KERNEL);
 	if (!arg) {
 		kfree_skb(msg->rep);
+		msg->rep = NULL;
 		return -ENOMEM;
 	}
 
 	err = __tipc_nl_compat_dumpit(cmd, msg, arg);
-	if (err)
+	if (err) {
 		kfree_skb(msg->rep);
-
+		msg->rep = NULL;
+	}
 	kfree_skb(arg);
 
 	return err;
@@ -287,8 +289,9 @@ static int __tipc_nl_compat_doit(struct tipc_nl_compat_cmd_doit *cmd,
 	if (err)
 		goto trans_out;
 
-	attrbuf = kmalloc((tipc_genl_family.maxattr + 1) *
-			sizeof(struct nlattr *), GFP_KERNEL);
+	attrbuf = kmalloc_array(tipc_genl_family.maxattr + 1,
+				sizeof(struct nlattr *),
+				GFP_KERNEL);
 	if (!attrbuf) {
 		err = -ENOMEM;
 		goto trans_out;

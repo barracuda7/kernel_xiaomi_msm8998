@@ -682,6 +682,9 @@ static int threshold_create_bank(unsigned int cpu, unsigned int bank)
 	const char *name = th_names[bank];
 	int err = 0;
 
+	if (!dev)
+		return -ENODEV;
+
 	if (is_shared_bank(bank)) {
 		nb = node_to_amd_nb(amd_get_nb_id(cpu));
 
@@ -744,7 +747,7 @@ static int threshold_create_device(unsigned int cpu)
 	struct threshold_bank **bp;
 	int err = 0;
 
-	bp = kzalloc(sizeof(struct threshold_bank *) * mca_cfg.banks,
+	bp = kcalloc(mca_cfg.banks, sizeof(struct threshold_bank *),
 		     GFP_KERNEL);
 	if (!bp)
 		return -ENOMEM;

@@ -600,8 +600,9 @@ int nf_nat_l4proto_register(u8 l3proto, const struct nf_nat_l4proto *l4proto)
 
 	mutex_lock(&nf_nat_proto_mutex);
 	if (nf_nat_l4protos[l3proto] == NULL) {
-		l4protos = kmalloc(IPPROTO_MAX * sizeof(struct nf_nat_l4proto *),
-				   GFP_KERNEL);
+		l4protos = kmalloc_array(IPPROTO_MAX,
+					 sizeof(struct nf_nat_l4proto *),
+					 GFP_KERNEL);
 		if (l4protos == NULL) {
 			ret = -ENOMEM;
 			goto out;
@@ -892,6 +893,8 @@ static void __exit nf_nat_cleanup(void)
 #ifdef CONFIG_XFRM
 	RCU_INIT_POINTER(nf_nat_decode_session_hook, NULL);
 #endif
+	synchronize_rcu();
+
 	for (i = 0; i < NFPROTO_NUMPROTO; i++)
 		kfree(nf_nat_l4protos[i]);
 	synchronize_net();

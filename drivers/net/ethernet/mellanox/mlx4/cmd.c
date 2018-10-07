@@ -2278,6 +2278,17 @@ static int sync_toggles(struct mlx4_dev *dev)
 		rd_toggle = swab32(readl(&priv->mfunc.comm->slave_read));
 		if (wr_toggle == 0xffffffff || rd_toggle == 0xffffffff) {
 			/* PCI might be offline */
+
+			/* If device removal has been requested,
+			 * do not continue retrying.
+			 */
+			if (dev->persist->interface_state &
+			    MLX4_INTERFACE_STATE_NOWAIT) {
+				mlx4_warn(dev,
+					  "communication channel is offline\n");
+				return -EIO;
+			}
+
 			msleep(100);
 			wr_toggle = swab32(readl(&priv->mfunc.comm->
 					   slave_write));
@@ -2331,20 +2342,23 @@ int mlx4_multi_func_init(struct mlx4_dev *dev)
 		struct mlx4_vf_admin_state *vf_admin;
 
 		priv->mfunc.master.slave_state =
-			kzalloc(dev->num_slaves *
-				sizeof(struct mlx4_slave_state), GFP_KERNEL);
+			kcalloc(dev->num_slaves,
+				sizeof(struct mlx4_slave_state),
+				GFP_KERNEL);
 		if (!priv->mfunc.master.slave_state)
 			goto err_comm;
 
 		priv->mfunc.master.vf_admin =
-			kzalloc(dev->num_slaves *
-				sizeof(struct mlx4_vf_admin_state), GFP_KERNEL);
+			kcalloc(dev->num_slaves,
+				sizeof(struct mlx4_vf_admin_state),
+				GFP_KERNEL);
 		if (!priv->mfunc.master.vf_admin)
 			goto err_comm_admin;
 
 		priv->mfunc.master.vf_oper =
-			kzalloc(dev->num_slaves *
-				sizeof(struct mlx4_vf_oper_state), GFP_KERNEL);
+			kcalloc(dev->num_slaves,
+				sizeof(struct mlx4_vf_oper_state),
+				GFP_KERNEL);
 		if (!priv->mfunc.master.vf_oper)
 			goto err_comm_oper;
 
@@ -2577,9 +2591,9 @@ int mlx4_cmd_use_events(struct mlx4_dev *dev)
 	int i;
 	int err = 0;
 
-	priv->cmd.context = kmalloc(priv->cmd.max_cmds *
-				   sizeof (struct mlx4_cmd_context),
-				   GFP_KERNEL);
+	priv->cmd.context = kmalloc_array(priv->cmd.max_cmds,
+					  sizeof(struct mlx4_cmd_context),
+					  GFP_KERNEL);
 	if (!priv->cmd.context)
 		return -ENOMEM;
 

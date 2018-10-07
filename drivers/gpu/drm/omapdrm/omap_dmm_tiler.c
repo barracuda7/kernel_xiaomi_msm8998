@@ -288,7 +288,12 @@ static int dmm_txn_commit(struct dmm_txn *txn, bool wait)
 				msecs_to_jiffies(100))) {
 			dev_err(dmm->dev, "timed out waiting for done\n");
 			ret = -ETIMEDOUT;
+			goto cleanup;
 		}
+
+		/* Check the engine status before continue */
+		ret = wait_status(engine, DMM_PATSTATUS_READY |
+				  DMM_PATSTATUS_VALID | DMM_PATSTATUS_DONE);
 	}
 
 cleanup:
@@ -611,7 +616,8 @@ static int omap_dmm_probe(struct platform_device *dev)
 		match = of_match_node(dmm_of_match, dev->dev.of_node);
 		if (!match) {
 			dev_err(&dev->dev, "failed to find matching device node\n");
-			return -ENODEV;
+			ret = -ENODEV;
+			goto fail;
 		}
 
 		omap_dmm->plat_data = match->data;
@@ -892,8 +898,8 @@ int tiler_map_show(struct seq_file *s, void *arg)
 	h_adj = omap_dmm->container_height / ydiv;
 	w_adj = omap_dmm->container_width / xdiv;
 
-	map = kmalloc(h_adj * sizeof(*map), GFP_KERNEL);
-	global_map = kmalloc((w_adj + 1) * h_adj, GFP_KERNEL);
+	map = kmalloc_array(h_adj, sizeof(*map), GFP_KERNEL);
+	global_map = kmalloc_array(w_adj + 1, h_adj, GFP_KERNEL);
 
 	if (!map || !global_map)
 		goto error;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -187,8 +187,8 @@ static ssize_t sps_set_info(struct file *file, const char __user *buf,
 	/* allocate new buffer */
 	debugfs_buf_size = new_buf_size;
 
-	debugfs_buf = kzalloc(sizeof(char) * debugfs_buf_size,
-			GFP_KERNEL);
+	debugfs_buf = kzalloc(debugfs_buf_size,
+			      GFP_KERNEL);
 	if (!debugfs_buf) {
 		debugfs_buf_size = 0;
 		pr_err("sps:fail to allocate memory for debug_fs.\n");
@@ -1006,8 +1006,6 @@ static void sps_device_de_init(void)
 				"sps:%s:BAMs are still registered", __func__);
 
 		sps_map_de_init();
-
-		kfree(sps);
 	}
 
 	sps_mem_de_init();
@@ -2993,6 +2991,7 @@ static struct platform_driver msm_sps_driver = {
 		.name	= SPS_DRV_NAME,
 		.owner	= THIS_MODULE,
 		.of_match_table = msm_sps_match,
+		.suppress_bind_attrs = true,
 	},
 	.remove		= msm_sps_remove,
 };

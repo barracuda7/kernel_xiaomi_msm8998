@@ -1381,8 +1381,8 @@ static int rr_close(struct net_device *dev)
 			    rrpriv->info_dma);
 	rrpriv->info = NULL;
 
-	free_irq(pdev->irq, dev);
 	spin_unlock_irqrestore(&rrpriv->lock, flags);
+	free_irq(pdev->irq, dev);
 
 	return 0;
 }
@@ -1585,7 +1585,7 @@ static int rr_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			return -EPERM;
 		}
 
-		image = kmalloc(EEPROM_WORDS * sizeof(u32), GFP_KERNEL);
+		image = kmalloc_array(EEPROM_WORDS, sizeof(u32), GFP_KERNEL);
 		if (!image)
 			return -ENOMEM;
 
@@ -1616,8 +1616,9 @@ static int rr_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			return -EPERM;
 		}
 
-		image = kmalloc(EEPROM_WORDS * sizeof(u32), GFP_KERNEL);
-		oldimage = kmalloc(EEPROM_WORDS * sizeof(u32), GFP_KERNEL);
+		image = kmalloc_array(EEPROM_WORDS, sizeof(u32), GFP_KERNEL);
+		oldimage = kmalloc_array(EEPROM_WORDS, sizeof(u32),
+					 GFP_KERNEL);
 		if (!image || !oldimage) {
 			error = -ENOMEM;
 			goto wf_out;

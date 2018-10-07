@@ -515,7 +515,7 @@ static struct zram_meta *zram_meta_alloc(char *pool_name, u64 disksize)
 		return NULL;
 
 	num_pages = disksize >> PAGE_SHIFT;
-	meta->table = vzalloc(num_pages * sizeof(*meta->table));
+	meta->table = vzalloc(array_size(num_pages, sizeof(*meta->table)));
 	if (!meta->table) {
 		pr_err("Error allocating zram address table\n");
 		goto out_error;
@@ -1260,6 +1260,8 @@ static int zram_add(void)
 	blk_queue_io_min(zram->disk->queue, PAGE_SIZE);
 	blk_queue_io_opt(zram->disk->queue, PAGE_SIZE);
 	zram->disk->queue->limits.discard_granularity = PAGE_SIZE;
+	zram->disk->queue->limits.max_sectors = SECTORS_PER_PAGE;
+	zram->disk->queue->limits.chunk_sectors = 0;
 	blk_queue_max_discard_sectors(zram->disk->queue, UINT_MAX);
 	/*
 	 * zram_bio_discard() will clear all logical blocks if logical block

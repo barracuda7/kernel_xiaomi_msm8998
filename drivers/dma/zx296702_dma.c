@@ -26,7 +26,7 @@
 
 #define DRIVER_NAME		"zx-dma"
 #define DMA_ALIGN		4
-#define DMA_MAX_SIZE		(0x10000 - PAGE_SIZE)
+#define DMA_MAX_SIZE		(0x10000 - 512)
 #define LLI_BLOCK_SIZE		(4 * PAGE_SIZE)
 
 #define REG_ZX_SRC_ADDR			0x00
@@ -798,8 +798,8 @@ static int zx_dma_probe(struct platform_device *op)
 		return -ENOMEM;
 
 	/* init phy channel */
-	d->phy = devm_kzalloc(&op->dev,
-		d->dma_channels * sizeof(struct zx_dma_phy), GFP_KERNEL);
+	d->phy = devm_kcalloc(&op->dev,
+		d->dma_channels, sizeof(struct zx_dma_phy), GFP_KERNEL);
 	if (!d->phy)
 		return -ENOMEM;
 
@@ -813,6 +813,7 @@ static int zx_dma_probe(struct platform_device *op)
 	INIT_LIST_HEAD(&d->slave.channels);
 	dma_cap_set(DMA_SLAVE, d->slave.cap_mask);
 	dma_cap_set(DMA_MEMCPY, d->slave.cap_mask);
+	dma_cap_set(DMA_CYCLIC, d->slave.cap_mask);
 	dma_cap_set(DMA_PRIVATE, d->slave.cap_mask);
 	d->slave.dev = &op->dev;
 	d->slave.device_free_chan_resources = zx_dma_free_chan_resources;
@@ -833,8 +834,8 @@ static int zx_dma_probe(struct platform_device *op)
 	d->slave.residue_granularity = DMA_RESIDUE_GRANULARITY_SEGMENT;
 
 	/* init virtual channel */
-	d->chans = devm_kzalloc(&op->dev,
-		d->dma_requests * sizeof(struct zx_dma_chan), GFP_KERNEL);
+	d->chans = devm_kcalloc(&op->dev,
+		d->dma_requests, sizeof(struct zx_dma_chan), GFP_KERNEL);
 	if (!d->chans)
 		return -ENOMEM;
 

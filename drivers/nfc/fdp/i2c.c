@@ -210,13 +210,13 @@ static irqreturn_t fdp_nci_i2c_irq_thread_fn(int irq, void *phy_id)
 	struct sk_buff *skb;
 	int r;
 
-	client = phy->i2c_dev;
-	dev_dbg(&client->dev, "%s\n", __func__);
-
 	if (!phy || irq != phy->i2c_dev->irq) {
 		WARN_ON_ONCE(1);
 		return IRQ_NONE;
 	}
+
+	client = phy->i2c_dev;
+	dev_dbg(&client->dev, "%s\n", __func__);
 
 	r = fdp_nci_i2c_read(phy, &skb);
 
@@ -260,8 +260,8 @@ static void fdp_nci_i2c_read_device_properties(struct device *dev,
 		/* Add 1 to the length to inclue the length byte itself */
 		len++;
 
-		*fw_vsc_cfg = devm_kmalloc(dev,
-					   len * sizeof(**fw_vsc_cfg),
+		*fw_vsc_cfg = devm_kmalloc_array(dev,
+					   len, sizeof(**fw_vsc_cfg),
 					   GFP_KERNEL);
 
 		r = device_property_read_u8_array(dev, FDP_DP_FW_VSC_CFG_NAME,

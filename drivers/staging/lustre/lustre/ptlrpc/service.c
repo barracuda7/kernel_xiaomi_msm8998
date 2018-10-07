@@ -488,7 +488,7 @@ ptlrpc_service_part_init(struct ptlrpc_service *svc,
 
 	/* allocate memory for scp_at_array (ptlrpc_at_array) */
 	array->paa_reqs_array =
-		kzalloc_node(sizeof(struct list_head) * size, GFP_NOFS,
+		kcalloc_node(size, sizeof(struct list_head), GFP_NOFS,
 			     cfs_cpt_spread_node(svc->srv_cptable, cpt));
 	if (array->paa_reqs_array == NULL)
 		return -ENOMEM;
@@ -497,7 +497,7 @@ ptlrpc_service_part_init(struct ptlrpc_service *svc,
 		INIT_LIST_HEAD(&array->paa_reqs_array[index]);
 
 	array->paa_reqs_count =
-		kzalloc_node(sizeof(__u32) * size, GFP_NOFS,
+		kcalloc_node(size, sizeof(__u32), GFP_NOFS,
 			     cfs_cpt_spread_node(svc->srv_cptable, cpt));
 	if (array->paa_reqs_count == NULL)
 		goto free_reqs_array;
@@ -1240,20 +1240,15 @@ static int ptlrpc_server_hpreq_init(struct ptlrpc_service_part *svcpt,
 		 * it may hit swab race at LU-1044. */
 		if (req->rq_ops->hpreq_check) {
 			rc = req->rq_ops->hpreq_check(req);
-			/**
-			 * XXX: Out of all current
-			 * ptlrpc_hpreq_ops::hpreq_check(), only
-			 * ldlm_cancel_hpreq_check() can return an error code;
-			 * other functions assert in similar places, which seems
-			 * odd. What also does not seem right is that handlers
-			 * for those RPCs do not assert on the same checks, but
-			 * rather handle the error cases. e.g. see
-			 * ost_rw_hpreq_check(), and ost_brw_read(),
-			 * ost_brw_write().
+			if (rc == -ESTALE) {
+				req->rq_status = rc;
+				ptlrpc_error(req);
+			}
+			/** can only return error,
+			 * 0 for normal request,
+			 *  or 1 for high priority request
 			 */
-			if (rc < 0)
-				return rc;
-			LASSERT(rc == 0 || rc == 1);
+			LASSERT(rc <= 1);
 		}
 
 		spin_lock_bh(&req->rq_export->exp_rpc_lock);
@@ -2506,9 +2501,9 @@ int ptlrpc_hr_init(void)
 
 		LASSERT(hrp->hrp_nthrs > 0);
 		hrp->hrp_thrs =
-			kzalloc_node(hrp->hrp_nthrs * sizeof(*hrt), GFP_NOFS,
-				cfs_cpt_spread_node(ptlrpc_hr.hr_cpt_table,
-						    i));
+			kcalloc_node(hrp->hrp_nthrs, sizeof(*hrt), GFP_NOFS,
+				     cfs_cpt_spread_node(ptlrpc_hr.hr_cpt_table,
+							 i));
 		if (hrp->hrp_thrs == NULL) {
 			rc = -ENOMEM;
 			goto out;

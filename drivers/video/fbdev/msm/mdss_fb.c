@@ -46,6 +46,7 @@
 #include <linux/file.h>
 #include <linux/kthread.h>
 #include <linux/dma-buf.h>
+#include <linux/cpu_input_boost.h>
 #include <sync.h>
 #include <sw_sync.h>
 
@@ -1183,8 +1184,8 @@ static int mdss_fb_init_panel_modes(struct msm_fb_data_type *mfd,
 	list_for_each(pos, &pdata->timings_list)
 		num_timings++;
 
-	modedb = devm_kzalloc(fbi->dev, num_timings * sizeof(*modedb),
-			GFP_KERNEL);
+	modedb = devm_kcalloc(fbi->dev, num_timings, sizeof(*modedb),
+			      GFP_KERNEL);
 	if (!modedb)
 		return -ENOMEM;
 
@@ -3784,7 +3785,7 @@ static int __mdss_fb_display_thread(void *data)
 				mfd->index);
 
 	while (1) {
-		wait_event_interruptible(mfd->commit_wait_q,
+		wait_event(mfd->commit_wait_q,
 				(atomic_read(&mfd->commits_pending) ||
 				 kthread_should_stop()));
 
@@ -5051,6 +5052,7 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 		ret = mdss_fb_mode_switch(mfd, dsi_mode);
 		break;
 	case MSMFB_ATOMIC_COMMIT:
+		cpu_input_boost_kick();
 		ret = mdss_fb_atomic_commit_ioctl(info, argp, file);
 		break;
 

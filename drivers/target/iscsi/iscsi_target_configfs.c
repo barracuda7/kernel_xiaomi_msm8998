@@ -773,8 +773,9 @@ static int lio_target_init_nodeacl(struct se_node_acl *se_nacl,
 		container_of(se_nacl, struct iscsi_node_acl, se_node_acl);
 	struct config_group *stats_cg = &se_nacl->acl_fabric_stat_group;
 
-	stats_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
-				GFP_KERNEL);
+	stats_cg->default_groups = kmalloc_array(2,
+						 sizeof(struct config_group *),
+						 GFP_KERNEL);
 	if (!stats_cg->default_groups) {
 		pr_err("Unable to allocate memory for"
 				" stats_cg->default_groups\n");
@@ -868,6 +869,7 @@ DEF_TPG_ATTRIB(default_erl);
 DEF_TPG_ATTRIB(t10_pi);
 DEF_TPG_ATTRIB(fabric_prot_type);
 DEF_TPG_ATTRIB(tpg_enabled_sendtargets);
+DEF_TPG_ATTRIB(login_keys_workaround);
 
 static struct configfs_attribute *lio_target_tpg_attrib_attrs[] = {
 	&iscsi_tpg_attrib_attr_authentication,
@@ -883,6 +885,7 @@ static struct configfs_attribute *lio_target_tpg_attrib_attrs[] = {
 	&iscsi_tpg_attrib_attr_t10_pi,
 	&iscsi_tpg_attrib_attr_fabric_prot_type,
 	&iscsi_tpg_attrib_attr_tpg_enabled_sendtargets,
+	&iscsi_tpg_attrib_attr_login_keys_workaround,
 	NULL,
 };
 
@@ -1208,7 +1211,7 @@ static struct se_portal_group *lio_target_tiqn_addtpg(
 
 	ret = core_tpg_register(wwn, &tpg->tpg_se_tpg, SCSI_PROTOCOL_ISCSI);
 	if (ret < 0)
-		return NULL;
+		goto free_out;
 
 	ret = iscsit_tpg_add_portal_group(tiqn, tpg);
 	if (ret != 0)
@@ -1220,6 +1223,7 @@ static struct se_portal_group *lio_target_tiqn_addtpg(
 	return &tpg->tpg_se_tpg;
 out:
 	core_tpg_deregister(&tpg->tpg_se_tpg);
+free_out:
 	kfree(tpg);
 	return NULL;
 }
@@ -1271,8 +1275,9 @@ static struct se_wwn *lio_target_call_coreaddtiqn(
 	 */
 	stats_cg = &tiqn->tiqn_wwn.fabric_stat_group;
 
-	stats_cg->default_groups = kmalloc(sizeof(struct config_group *) * 6,
-				GFP_KERNEL);
+	stats_cg->default_groups = kmalloc_array(6,
+						 sizeof(struct config_group *),
+						 GFP_KERNEL);
 	if (!stats_cg->default_groups) {
 		pr_err("Unable to allocate memory for"
 				" stats_cg->default_groups\n");

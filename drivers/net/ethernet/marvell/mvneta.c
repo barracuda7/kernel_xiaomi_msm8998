@@ -818,6 +818,7 @@ static void mvneta_port_up(struct mvneta_port *pp)
 	}
 	mvreg_write(pp, MVNETA_TXQ_CMD, q_map);
 
+	q_map = 0;
 	/* Enable all initialized RXQs. */
 	mvreg_write(pp, MVNETA_RXQ_CMD, BIT(rxq_def));
 }
@@ -913,6 +914,10 @@ static void mvneta_port_disable(struct mvneta_port *pp)
 	val = mvreg_read(pp, MVNETA_GMAC_CTRL_0);
 	val &= ~MVNETA_GMAC0_PORT_ENABLE;
 	mvreg_write(pp, MVNETA_GMAC_CTRL_0, val);
+
+	pp->link = 0;
+	pp->duplex = -1;
+	pp->speed = 0;
 
 	udelay(200);
 }
@@ -2334,7 +2339,8 @@ static int mvneta_txq_init(struct mvneta_port *pp,
 	mvreg_write(pp, MVNETA_TXQ_BASE_ADDR_REG(txq->id), txq->descs_phys);
 	mvreg_write(pp, MVNETA_TXQ_SIZE_REG(txq->id), txq->size);
 
-	txq->tx_skb = kmalloc(txq->size * sizeof(*txq->tx_skb), GFP_KERNEL);
+	txq->tx_skb = kmalloc_array(txq->size, sizeof(*txq->tx_skb),
+				    GFP_KERNEL);
 	if (txq->tx_skb == NULL) {
 		dma_free_coherent(pp->dev->dev.parent,
 				  txq->size * MVNETA_DESC_ALIGNED_SIZE,

@@ -314,7 +314,8 @@ restart:
 	pending_now   = pending & ~pending_mask;
 	if (pending) {
 		if (pending_now && time_before(jiffies, end) &&
-		    !need_resched() && !defer_for_rt() && --max_restart)
+		    !defer_for_rt() &&
+		    !need_resched() && --max_restart)
 			goto restart;
 
 		/*

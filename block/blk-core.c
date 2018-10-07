@@ -540,8 +540,8 @@ void blk_set_queue_dying(struct request_queue *q)
 
 		blk_queue_for_each_rl(rl, q) {
 			if (rl->rq_pool) {
-				wake_up(&rl->wait[BLK_RW_SYNC]);
-				wake_up(&rl->wait[BLK_RW_ASYNC]);
+				wake_up_all(&rl->wait[BLK_RW_SYNC]);
+				wake_up_all(&rl->wait[BLK_RW_ASYNC]);
 			}
 		}
 	}
@@ -1264,11 +1264,7 @@ retry:
 	trace_block_sleeprq(q, bio, rw_flags & 1);
 
 	spin_unlock_irq(q->queue_lock);
-	/*
-	 * FIXME: this should be io_schedule().  The timeout is there as a
-	 * workaround for some io timeout problems.
-	 */
-	io_schedule_timeout(5*HZ);
+	io_schedule();
 
 	/*
 	 * After sleeping, we become a "batching" process and will be able

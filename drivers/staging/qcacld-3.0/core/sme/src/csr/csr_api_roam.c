@@ -14133,7 +14133,7 @@ static void csr_roam_update_connected_profile_from_new_bss(tpAniSirGlobal pMac,
 			     &(pNewBss->bssId), sizeof(struct qdf_mac_addr));
 	}
 }
-#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+
 void csr_get_pmk_info(tpAniSirGlobal mac_ctx, uint8_t session_id,
 			  tPmkidCacheInfo *pmk_cache)
 {
@@ -14152,7 +14152,7 @@ void csr_get_pmk_info(tpAniSirGlobal mac_ctx, uint8_t session_id,
 					sizeof(session->psk_pmk));
 	pmk_cache->pmk_len = session->pmk_len;
 }
-
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
 QDF_STATUS csr_roam_set_psk_pmk(tpAniSirGlobal pMac, uint32_t sessionId,
 				uint8_t *pPSK_PMK, size_t pmk_len)
 {
@@ -18413,7 +18413,7 @@ csr_fetch_valid_ch_lst(tpAniSirGlobal mac_ctx,
 	}
 
 	if (CSR_IS_ROAM_INTRA_BAND_ENABLED(mac_ctx)) {
-		band = get_rf_band(mac_ctx->roam.roamSession[session_id].
+		band = (eCsrBand) get_rf_band(mac_ctx->roam.roamSession[session_id].
 				connectedProfile.operationChannel);
 		sme_debug("updated band %d operational ch %d", band,
 				mac_ctx->roam.roamSession[session_id].

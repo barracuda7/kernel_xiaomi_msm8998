@@ -59,7 +59,6 @@
 #include "pld_common.h"
 #include "wlan_hdd_power.h"
 #include <wlan_hdd_tsf.h>
-#include "sme_power_save_api.h"
 
 #ifdef QCA_LL_TX_FLOW_CONTROL_V2
 /*
@@ -1017,16 +1016,6 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 				 QDF_TRACE_LEVEL_INFO_HIGH,
 				 "%s: station is not connected. drop the pkt",
 				 __func__);
-		++pAdapter->hdd_stats.hddTxRxStats.txXmitDroppedAC[ac];
-		goto drop_pkt_and_release_skb;
-	}
-
-	/* check whether need to linearize skb, like non-linear udp data */
-	if (hdd_skb_nontso_linearize(skb) != QDF_STATUS_SUCCESS) {
-		QDF_TRACE(QDF_MODULE_ID_HDD_DATA,
-			  QDF_TRACE_LEVEL_INFO_HIGH,
-			  "%s: skb %pK linearize failed. drop the pkt",
-			  __func__, skb);
 		++pAdapter->hdd_stats.hddTxRxStats.txXmitDroppedAC[ac];
 		goto drop_pkt_and_release_skb;
 	}

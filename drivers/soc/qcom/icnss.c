@@ -1450,7 +1450,7 @@ out:
 	return ret;
 }
 
-static int wlfw_wlan_mode_send_sync_msg(enum wlfw_driver_mode_enum_v01 mode)
+static int wlfw_wlan_mode_send_sync_msg(u32 mode)
 {
 	int ret;
 	struct wlfw_wlan_mode_req_msg_v01 req;
@@ -2214,6 +2214,8 @@ static int icnss_driver_event_fw_ready_ind(void *data)
 		return -ENODEV;
 
 	set_bit(ICNSS_FW_READY, &penv->state);
+
+	icnss_call_driver_uevent(penv, ICNSS_UEVENT_FW_READY, NULL);
 
 	icnss_pr_info("WLAN FW is ready: 0x%lx\n", penv->state);
 

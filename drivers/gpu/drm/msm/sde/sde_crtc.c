@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -20,6 +20,7 @@
 #include <linux/sort.h>
 #include <linux/debugfs.h>
 #include <linux/ktime.h>
+#include <linux/cpu_input_boost.h>
 #include <uapi/drm/sde_drm.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_crtc.h>
@@ -950,6 +951,9 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc)
 
 
 	SDE_ATRACE_BEGIN("crtc_commit");
+
+	cpu_input_boost_kick();
+
 	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
 		if (encoder->crtc != crtc)
 			continue;
@@ -1558,7 +1562,7 @@ void sde_crtc_cancel_pending_flip(struct drm_crtc *crtc,
 {
 	struct sde_crtc *sde_crtc = to_sde_crtc(crtc);
 
-	SDE_DEBUG("%s: cancel: %pK\n", sde_crtc->name, file);
+	SDE_DEBUG("%s: cancel: %p\n", sde_crtc->name, file);
 	_sde_crtc_complete_flip(crtc, file);
 }
 

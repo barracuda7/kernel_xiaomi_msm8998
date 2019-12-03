@@ -21,6 +21,7 @@
 #include <linux/seq_file.h>
 
 #include "msm_drv.h"
+#include "sde_recovery_manager.h"
 #include "sde_kms.h"
 #include "drm_crtc.h"
 #include "drm_crtc_helper.h"
@@ -42,6 +43,15 @@
 
 /* timeout in frames waiting for frame done */
 #define SDE_ENCODER_FRAME_DONE_TIMEOUT	60
+
+/* timeout in msecs */
+#define SDE_ENCODER_UNDERRUN_TIMEOUT	200
+/* underrun count threshold value */
+#define SDE_ENCODER_UNDERRUN_CNT_MAX	10
+/* 3 vsync time period in msec, report underrun  */
+#define SDE_ENCODER_UNDERRUN_DELTA	50
+
+#define MISR_BUFF_SIZE	256
 
 /*
  * Two to anticipate panels that can do cmd/vid dynamic switching
@@ -152,6 +162,11 @@ static struct sde_csc_cfg sde_csc_10bit_convert[SDE_MAX_CSC] = {
  * @crtc_frame_event:		callback event
  * @frame_done_timeout:		frame done timeout in Hz
  * @frame_done_timer:		watchdog timer for frame done event
+ * @last_underrun_ts:		variable to hold the last occurred underrun
+ *				timestamp
+ * @underrun_cnt_dwork:		underrun counter for delayed work
+ * @dwork:			delayed work for deferring the reporting
+ *				of underrun error
  */
 struct sde_encoder_virt {
 	struct drm_encoder base;
@@ -178,6 +193,11 @@ struct sde_encoder_virt {
 	u32 crtc_frame_event;
 	atomic_t frame_done_timeout;
 	struct timer_list frame_done_timer;
+	atomic_t last_underrun_ts;
+	atomic_t underrun_cnt_dwork;
+	struct delayed_work dwork;
+
+	bool is_shared;
 };
 
 #define to_sde_encoder_virt(x) container_of(x, struct sde_encoder_virt, base)
@@ -308,6 +328,7 @@ static int sde_encoder_virt_atomic_check(
 	struct sde_kms *sde_kms;
 	const struct drm_display_mode *mode;
 	struct drm_display_mode *adj_mode;
+	struct sde_connector *sde_conn = NULL;
 	int i = 0;
 	int ret = 0;
 
@@ -344,6 +365,13 @@ static int sde_encoder_virt_atomic_check(
 		}
 	}
 
+	sde_conn = to_sde_connector(conn_state->connector);
+	if (sde_conn) {
+		if (sde_conn->ops.set_topology_ctl)
+			sde_conn->ops.set_topology_ctl(conn_state->connector,
+					adj_mode, sde_conn->display);
+	}
+
 	/* Reserve dynamic resources now. Indicating AtomicTest phase */
 	if (!ret)
 		ret = sde_rm_reserve(&sde_kms->rm, drm_enc, crtc_state,
@@ -366,6 +394,7 @@ static void sde_encoder_virt_mode_set(struct drm_encoder *drm_enc,
 	struct sde_kms *sde_kms;
 	struct list_head *connector_list;
 	struct drm_connector *conn = NULL, *conn_iter;
+	struct sde_connector *sde_conn = NULL;
 	struct sde_rm_hw_iter pp_iter;
 	int i = 0, ret;
 
@@ -395,6 +424,13 @@ static void sde_encoder_virt_mode_set(struct drm_encoder *drm_enc,
 		return;
 	}
 
+	sde_conn = to_sde_connector(conn);
+	if (sde_conn) {
+		if (sde_conn->ops.set_topology_ctl)
+			sde_conn->ops.set_topology_ctl(conn,
+					adj_mode, sde_conn->display);
+	}
+
 	/* Reserve dynamic resources now. Indicating non-AtomicTest phase */
 	ret = sde_rm_reserve(&sde_kms->rm, drm_enc, drm_enc->crtc->state,
 			conn->state, false);
@@ -416,7 +452,7 @@ static void sde_encoder_virt_mode_set(struct drm_encoder *drm_enc,
 		struct sde_encoder_phys *phys = sde_enc->phys_encs[i];
 
 		if (phys) {
-			if (!sde_enc->hw_pp[i]) {
+			if (!sde_enc->hw_pp[i] && !sde_enc->is_shared) {
 				SDE_ERROR_ENC(sde_enc,
 				    "invalid pingpong block for the encoder\n");
 				return;
@@ -594,12 +630,27 @@ static void sde_encoder_vblank_callback(struct drm_encoder *drm_enc,
 static void sde_encoder_underrun_callback(struct drm_encoder *drm_enc,
 		struct sde_encoder_phys *phy_enc)
 {
+	struct sde_encoder_virt *sde_enc = NULL;
+
 	if (!phy_enc)
 		return;
+
+	sde_enc = to_sde_encoder_virt(drm_enc);
 
 	SDE_ATRACE_BEGIN("encoder_underrun_callback");
 	atomic_inc(&phy_enc->underrun_cnt);
 	SDE_EVT32(DRMID(drm_enc), atomic_read(&phy_enc->underrun_cnt));
+
+	/* schedule delayed work if it has not scheduled or executed earlier */
+	if ((!atomic_read(&sde_enc->last_underrun_ts)) &&
+		(!atomic_read(&sde_enc->underrun_cnt_dwork))) {
+		schedule_delayed_work(&sde_enc->dwork,
+			msecs_to_jiffies(SDE_ENCODER_UNDERRUN_TIMEOUT));
+	}
+
+	/* take snapshot of current underrun and increment the count */
+	atomic_set(&sde_enc->last_underrun_ts, jiffies);
+	atomic_inc(&sde_enc->underrun_cnt_dwork);
 
 	trace_sde_encoder_underrun(DRMID(drm_enc),
 		atomic_read(&phy_enc->underrun_cnt));
@@ -1052,16 +1103,18 @@ static ssize_t _sde_encoder_misr_set(struct file *file,
 	struct sde_encoder_virt *sde_enc;
 	struct drm_encoder *drm_enc;
 	int i = 0;
-	char buf[10];
+	char buf[MISR_BUFF_SIZE + 1];
+	size_t buff_copy;
 	u32 enable, frame_count;
 
 	drm_enc = file->private_data;
 	sde_enc = to_sde_encoder_virt(drm_enc);
 
-	if (copy_from_user(buf, user_buf, count))
-		return -EFAULT;
+	buff_copy = min_t(size_t, MISR_BUFF_SIZE, count);
+	if (copy_from_user(buf, user_buf, buff_copy))
+		return -EINVAL;
 
-	buf[count] = 0; /* end of string */
+	buf[buff_copy] = 0; /* end of string */
 
 	if (sscanf(buf, "%u %u", &enable, &frame_count) != 2)
 		return -EFAULT;
@@ -1243,6 +1296,33 @@ static int sde_encoder_virt_add_phys_enc_wb(struct sde_encoder_virt *sde_enc,
 	return 0;
 }
 
+static int sde_encoder_virt_add_phys_enc_shd(struct sde_encoder_virt *sde_enc,
+		struct sde_enc_phys_init_params *params)
+{
+	struct sde_encoder_phys *enc = NULL;
+
+	if (sde_enc->num_phys_encs + 1 >= ARRAY_SIZE(sde_enc->phys_encs)) {
+		SDE_ERROR_ENC(sde_enc, "too many physical encoders %d\n",
+			  sde_enc->num_phys_encs);
+		return -EINVAL;
+	}
+
+	enc = sde_encoder_phys_shd_init(params);
+
+	if (IS_ERR(enc)) {
+		SDE_ERROR_ENC(sde_enc, "failed to init shd enc: %ld\n",
+			PTR_ERR(enc));
+		return PTR_ERR(enc);
+	}
+
+	sde_enc->is_shared = true;
+
+	sde_enc->phys_encs[sde_enc->num_phys_encs] = enc;
+	++sde_enc->num_phys_encs;
+
+	return 0;
+}
+
 static int sde_encoder_setup_display(struct sde_encoder_virt *sde_enc,
 				 struct sde_kms *sde_kms,
 				 struct msm_display_info *disp_info,
@@ -1313,7 +1393,10 @@ static int sde_encoder_setup_display(struct sde_encoder_virt *sde_enc,
 		SDE_DEBUG("h_tile_instance %d = %d, split_role %d\n",
 				i, controller_id, phys_params.split_role);
 
-		if (intf_type == INTF_WB) {
+		if (disp_info->capabilities & MSM_DISPLAY_CAP_SHARED) {
+			phys_params.wb_idx = WB_MAX;
+			phys_params.intf_idx = controller_id + INTF_0;
+		} else if (intf_type == INTF_WB) {
 			phys_params.intf_idx = INTF_MAX;
 			phys_params.wb_idx = sde_encoder_get_wb(
 					sde_kms->catalog,
@@ -1338,7 +1421,10 @@ static int sde_encoder_setup_display(struct sde_encoder_virt *sde_enc,
 		}
 
 		if (!ret) {
-			if (intf_type == INTF_WB)
+			if (disp_info->capabilities & MSM_DISPLAY_CAP_SHARED) {
+				ret = sde_encoder_virt_add_phys_enc_shd(sde_enc,
+						&phys_params);
+			} else if (intf_type == INTF_WB)
 				ret = sde_encoder_virt_add_phys_enc_wb(sde_enc,
 						&phys_params);
 			else
@@ -1385,6 +1471,37 @@ static void sde_encoder_frame_done_timeout(unsigned long data)
 			SDE_ENCODER_FRAME_EVENT_ERROR);
 }
 
+static void sde_encoder_underrun_work_func(struct work_struct *work)
+{
+	struct sde_encoder_virt *sde_enc =
+		container_of(work, struct sde_encoder_virt, dwork.work);
+
+	unsigned long delta, time;
+
+	if (!sde_enc) {
+		SDE_ERROR("invalid parameters\n");
+		return;
+	}
+
+	delta = jiffies - atomic_read(&sde_enc->last_underrun_ts);
+	time = jiffies_to_msecs(delta);
+
+	/*
+	 * report underrun error when it exceeds the threshold count
+	 * and the occurrence of last underrun error is less than 3
+	 * vsync period.
+	 */
+	if (atomic_read(&sde_enc->underrun_cnt_dwork) >
+			SDE_ENCODER_UNDERRUN_CNT_MAX &&
+			time < SDE_ENCODER_UNDERRUN_DELTA) {
+		sde_recovery_set_events(SDE_UNDERRUN);
+	}
+
+	/* reset underrun last timestamp and counter */
+	atomic_set(&sde_enc->last_underrun_ts, 0);
+	atomic_set(&sde_enc->underrun_cnt_dwork, 0);
+}
+
 struct drm_encoder *sde_encoder_init(
 		struct drm_device *dev,
 		struct msm_display_info *disp_info)
@@ -1415,8 +1532,11 @@ struct drm_encoder *sde_encoder_init(
 	drm_encoder_helper_add(drm_enc, &sde_encoder_helper_funcs);
 
 	atomic_set(&sde_enc->frame_done_timeout, 0);
+	atomic_set(&sde_enc->last_underrun_ts, 0);
+	atomic_set(&sde_enc->underrun_cnt_dwork, 0);
 	setup_timer(&sde_enc->frame_done_timer, sde_encoder_frame_done_timeout,
 			(unsigned long) sde_enc);
+	INIT_DELAYED_WORK(&sde_enc->dwork, sde_encoder_underrun_work_func);
 
 	_sde_encoder_init_debugfs(drm_enc, sde_enc, sde_kms);
 

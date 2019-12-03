@@ -25,8 +25,6 @@
 #define NUM_LNODES	3
 #define MAX_STR_CL	50
 
-#define DEBUG_REC_TRANSACTION 0
-
 struct bus_search_type {
 	struct list_head link;
 	struct list_head node_list;
@@ -551,6 +549,7 @@ static uint64_t aggregate_bus_req(struct msm_bus_node_device_type *bus_dev,
 	struct msm_bus_node_device_type *fab_dev = NULL;
 	uint32_t agg_scheme;
 	uint64_t max_ib = 0;
+	uint64_t max_ab = 0;
 	uint64_t sum_ab = 0;
 
 	if (!bus_dev || !to_msm_bus_node(bus_dev->node_info->bus_device)) {
@@ -558,14 +557,25 @@ static uint64_t aggregate_bus_req(struct msm_bus_node_device_type *bus_dev,
 		goto exit_agg_bus_req;
 	}
 
+	bus_dev->node_bw[ctx].max_ib_cl_name = NULL;
+	bus_dev->node_bw[ctx].max_ab_cl_name = NULL;
 	fab_dev = to_msm_bus_node(bus_dev->node_info->bus_device);
 	for (i = 0; i < bus_dev->num_lnodes; i++) {
+		if (bus_dev->lnode_list[i].lnode_ib[ctx] > max_ib)
+			bus_dev->node_bw[ctx].max_ib_cl_name =
+					bus_dev->lnode_list[i].cl_name;
 		max_ib = max(max_ib, bus_dev->lnode_list[i].lnode_ib[ctx]);
+		if (bus_dev->lnode_list[i].lnode_ab[ctx] > max_ab) {
+			max_ab = bus_dev->lnode_list[i].lnode_ab[ctx];
+			bus_dev->node_bw[ctx].max_ab_cl_name =
+					bus_dev->lnode_list[i].cl_name;
+		}
 		sum_ab += bus_dev->lnode_list[i].lnode_ab[ctx];
 	}
 
 	bus_dev->node_bw[ctx].sum_ab = sum_ab;
 	bus_dev->node_bw[ctx].max_ib = max_ib;
+	bus_dev->node_bw[ctx].max_ab = max_ab;
 
 	if (bus_dev->node_info->agg_params.agg_scheme != AGG_SCHEME_NONE)
 		agg_scheme = bus_dev->node_info->agg_params.agg_scheme;
@@ -1255,8 +1265,7 @@ static int update_bw_adhoc(struct msm_bus_client_handle *cl, u64 ab, u64 ib)
 	if (!strcmp(test_cl, cl->name))
 		log_transaction = true;
 
-	if (DEBUG_REC_TRANSACTION)
-		msm_bus_dbg_rec_transaction(cl, ab, ib);
+	msm_bus_dbg_rec_transaction(cl, ab, ib);
 
 	if ((cl->cur_act_ib == ib) && (cl->cur_act_ab == ab)) {
 		MSM_BUS_DBG("%s:no change in request", cl->name);
@@ -1317,8 +1326,7 @@ static int update_bw_context(struct msm_bus_client_handle *cl, u64 act_ab,
 
 	if (!slp_ab && !slp_ib)
 		cl->active_only = true;
-	if (DEBUG_REC_TRANSACTION)
-		msm_bus_dbg_rec_transaction(cl, cl->cur_act_ab, cl->cur_slp_ib);
+	msm_bus_dbg_rec_transaction(cl, cl->cur_act_ab, cl->cur_slp_ib);
 	ret = update_path(cl->mas_dev, cl->slv, act_ib, act_ab, slp_ib, slp_ab,
 				cl->cur_act_ab, cl->cur_act_ab,  cl->first_hop,
 				cl->active_only);

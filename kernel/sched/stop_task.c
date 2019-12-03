@@ -1,4 +1,5 @@
 #include "sched.h"
+#include "walt.h"
 
 /*
  * stop-task scheduling class.
@@ -11,7 +12,8 @@
 
 #ifdef CONFIG_SMP
 static int
-select_task_rq_stop(struct task_struct *p, int cpu, int sd_flag, int flags)
+select_task_rq_stop(struct task_struct *p, int cpu, int sd_flag, int flags,
+		    int sibling_count_hint)
 {
 	return task_cpu(p); /* stop tasks as never migrate */
 }
@@ -77,6 +79,7 @@ static void
 enqueue_task_stop(struct rq *rq, struct task_struct *p, int flags)
 {
 	add_nr_running(rq, 1);
+	walt_inc_cumulative_runnable_avg(rq, p);
 	inc_hmp_sched_stats_stop(rq, p);
 }
 
@@ -84,6 +87,7 @@ static void
 dequeue_task_stop(struct rq *rq, struct task_struct *p, int flags)
 {
 	sub_nr_running(rq, 1);
+	walt_dec_cumulative_runnable_avg(rq, p);
 	dec_hmp_sched_stats_stop(rq, p);
 }
 

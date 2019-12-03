@@ -54,6 +54,8 @@ extern int nr_cpu_ids;
  *     cpu_online_mask  - has bit 'cpu' set iff cpu available to scheduler
  *     cpu_active_mask  - has bit 'cpu' set iff cpu available to migration
  *     cpu_isolated_mask- has bit 'cpu' set iff cpu isolated
+ *     cpu_lp_mask      - has bit 'cpu' set iff cpu is part of little cluster
+ *     cpu_perf_mask    - has bit 'cpu' set iff cpu is part of big cluster
  *
  *  If !CONFIG_HOTPLUG_CPU, present == possible, and active == online.
  *
@@ -91,6 +93,8 @@ extern const struct cpumask *const cpu_online_mask;
 extern const struct cpumask *const cpu_present_mask;
 extern const struct cpumask *const cpu_active_mask;
 extern const struct cpumask *const cpu_isolated_mask;
+extern const struct cpumask *const cpu_lp_mask;
+extern const struct cpumask *const cpu_perf_mask;
 
 #if NR_CPUS > 1
 #define num_online_cpus()	cpumask_weight(cpu_online_mask)
@@ -675,6 +679,11 @@ void alloc_bootmem_cpumask_var(cpumask_var_t *mask);
 void free_cpumask_var(cpumask_var_t mask);
 void free_bootmem_cpumask_var(cpumask_var_t mask);
 
+static inline bool cpumask_available(cpumask_var_t mask)
+{
+	return mask != NULL;
+}
+
 #else
 typedef struct cpumask cpumask_var_t[1];
 
@@ -714,6 +723,11 @@ static inline void free_cpumask_var(cpumask_var_t mask)
 
 static inline void free_bootmem_cpumask_var(cpumask_var_t mask)
 {
+}
+
+static inline bool cpumask_available(cpumask_var_t mask)
+{
+	return true;
 }
 #endif /* CONFIG_CPUMASK_OFFSTACK */
 

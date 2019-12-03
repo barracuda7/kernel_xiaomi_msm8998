@@ -66,18 +66,8 @@ static void gf_irq_config(struct gf_device *gf_dev, bool state) {
 	gf_dev->irq_enabled = state;
 }
 
-static void gf_irq_update(struct gf_device *gf_dev) {
-	if (gf_dev->display_on || !gf_dev->proximity_state)
-		gf_irq_config(gf_dev, true);
-	else
-		gf_irq_config(gf_dev, false);
-}
-
 static void gf_kernel_key_input(struct gf_device *gf_dev, struct gf_key *gf_key)
 {
-	if (!gf_dev->enable_key_events)
-		return;
-
 	pr_debug("%s: received key, key=%d, value=%d\n",
 			__func__, gf_key->key, gf_key->value);
 
@@ -88,6 +78,8 @@ static void gf_kernel_key_input(struct gf_device *gf_dev, struct gf_key *gf_key)
 		break;
 	}
 }
+
+extern bool capacitive_keys_enabled;
 
 static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -114,8 +106,8 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			rc = -EFAULT;
 			break;
 		}
-
-		gf_kernel_key_input(gf_dev, &gf_key);
+		if (capacitive_keys_enabled)
+			gf_kernel_key_input(gf_dev, &gf_key);
 		break;
 	default:
 		pr_debug("%s: unsupport cmd:0x%x\n", __func__, cmd);
@@ -173,7 +165,7 @@ static int gf_open(struct inode *inode, struct file *filp)
 	 */
 	gf_dev->irq_enabled = true;
 	rc = request_threaded_irq(gf_dev->irq, NULL, gf_irq,
-			IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+			IRQF_TRIGGER_RISING | IRQF_ONESHOT | IRQF_PERF_CRITICAL,
 			GF_IRQ_NAME, gf_dev);
 	if (rc) {
 		pr_err("%s: failed to request threaded irq, rc = %d\n", __func__, rc);
@@ -250,12 +242,10 @@ static void gf_event_worker(struct work_struct *work)
 	case GF_NET_EVENT_FB_BLACK:
 		gf_dev->display_on = false;
 		set_user_nice(gf_dev->process, MIN_NICE);
-		gf_irq_update(gf_dev);
 		break;
 	case GF_NET_EVENT_FB_UNBLACK:
 		gf_dev->display_on = true;
 		set_user_nice(gf_dev->process, 0);
-		gf_irq_update(gf_dev);
 		break;
 	/*
 	 * IRQs are followed by fingerprint procesing, hold a wakelock to make
@@ -314,66 +304,6 @@ static struct notifier_block gf_fb_notifier = {
 	.notifier_call = gf_fb_state_callback,
 };
 
-static ssize_t gf_enable_key_events_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%d\n", gf_dev->enable_key_events);
-}
-
-static ssize_t gf_enable_key_events_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-	int value;
-	int rc;
-
-	rc = kstrtoint(buf, 10, &value);
-	if (rc)
-		return rc;
-
-	gf_dev->enable_key_events = !!value;
-
-	return count;
-}
-
-static DEVICE_ATTR(enable_key_events, S_IWUSR | S_IRUSR,
-	gf_enable_key_events_show,
-	gf_enable_key_events_store);
-
-static ssize_t gf_proximity_state_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-	int value;
-	int rc;
-
-	rc = kstrtoint(buf, 10, &value);
-	if (rc)
-		return -EINVAL;
-
-	gf_dev->proximity_state = !!value;
-
-	gf_irq_update(gf_dev);
-
-	return count;
-}
-
-static DEVICE_ATTR(proximity_state, S_IWUSR,
-	NULL,
-	gf_proximity_state_store);
-
-static struct attribute *gf_attributes[] = {
-	&dev_attr_enable_key_events.attr,
-	&dev_attr_proximity_state.attr,
-	NULL
-};
-
-static const struct attribute_group gf_attribute_group = {
-	.attrs = gf_attributes,
-};
-
 static int gf_probe(struct platform_device *pdev)
 {
 	struct gf_device *gf_dev = &gf;
@@ -384,10 +314,6 @@ static int gf_probe(struct platform_device *pdev)
 	gf_dev->process = NULL;
 	gf_dev->display_on = true;
 	gf_dev->irq_enabled = false;
-	gf_dev->enable_key_events = true;
-	gf_dev->proximity_state = 0;
-
-	platform_set_drvdata(pdev, gf_dev);
 
 	gf_dev->reset_gpio = of_get_named_gpio(pdev->dev.of_node,
 			"fp-gpio-reset", 0);
@@ -447,12 +373,6 @@ static int gf_probe(struct platform_device *pdev)
 		goto error_input_register;
 	}
 
-	rc = sysfs_create_group(&pdev->dev.kobj, &gf_attribute_group);
-	if (rc) {
-		pr_err("%s: failed to create sysfs attributes\n", __func__);
-		goto error_create_attributes;
-	}
-
 	gf_dev->notifier = gf_fb_notifier;
 	fb_register_client(&gf_dev->notifier);
 	gf_dev->event_workqueue = alloc_workqueue("gf-event-wq",
@@ -465,8 +385,6 @@ static int gf_probe(struct platform_device *pdev)
 
 	return 0;
 
-error_create_attributes:
-	input_unregister_device(gf_dev->input);
 error_input_register:
 	input_free_device(gf_dev->input);
 error_input_alloc:
@@ -491,8 +409,6 @@ static int gf_remove(struct platform_device *pdev)
 	destroy_workqueue(gf_dev->event_workqueue);
 
 	fb_unregister_client(&gf_dev->notifier);
-
-	sysfs_remove_group(&pdev->dev.kobj, &gf_attribute_group);
 
 	input_unregister_device(gf_dev->input);
 

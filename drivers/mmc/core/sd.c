@@ -33,6 +33,8 @@
 #define UHS_SDR25_MIN_DTR	(25 * 1000 * 1000)
 #define UHS_SDR12_MIN_DTR	(12.5 * 1000 * 1000)
 
+#define ENOCALLBACK 1
+
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -335,6 +337,7 @@ static int mmc_read_switch(struct mmc_card *card)
 		card->sw_caps.sd3_bus_mode = status[13];
 		/* Driver Strengths supported by the card */
 		card->sw_caps.sd3_drv_type = status[9];
+		card->sw_caps.sd3_curr_limit = status[7] | status[6] << 8;
 	}
 
 out:
@@ -497,7 +500,11 @@ static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
 		err = -EBUSY;
 	} else {
 		mmc_set_timing(card->host, timing);
-		mmc_set_clock(card->host, card->sw_caps.uhs_max_dtr);
+		if (card->host->ops->check_temp(card->host) &&
+				timing == MMC_TIMING_UHS_SDR104)
+			mmc_set_clock(card->host, UHS_SDR50_MAX_DTR);
+		else
+			mmc_set_clock(card->host, card->sw_caps.uhs_max_dtr);
 	}
 
 	return err;
@@ -557,14 +564,25 @@ static int sd_set_current_limit(struct mmc_card *card, u8 *status)
 	 * when we set current limit to 200ma, the card will draw 200ma, and
 	 * when we set current limit to 400/600/800ma, the card will draw its
 	 * maximum 300ma from the host.
+	 *
+	 * The above is incorrect: if we try to set a current limit that is
+	 * not supported by the card, the card can rightfully error out the
+	 * attempt, and remain at the default current limit.  This results
+	 * in a 300mA card being limited to 200mA even though the host
+	 * supports 800mA. Failures seen with SanDisk 8GB UHS cards with
+	 * an iMX6 host. --rmk
 	 */
-	if (max_current >= 800)
+	if (max_current >= 800 &&
+	    card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_800)
 		current_limit = SD_SET_CURRENT_LIMIT_800;
-	else if (max_current >= 600)
+	else if (max_current >= 600 &&
+		 card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_600)
 		current_limit = SD_SET_CURRENT_LIMIT_600;
-	else if (max_current >= 400)
+	else if (max_current >= 400 &&
+		 card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_400)
 		current_limit = SD_SET_CURRENT_LIMIT_400;
-	else if (max_current >= 200)
+	else if (max_current >= 200 &&
+		 card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_200)
 		current_limit = SD_SET_CURRENT_LIMIT_200;
 
 	if (current_limit != SD_SET_CURRENT_NO_CHANGE) {
@@ -1110,6 +1128,34 @@ free_card:
 	return err;
 }
 
+static int mmc_sd_init_temp_control_clk_scaling(struct mmc_host *host)
+{
+	int ret;
+
+	if (host->ops->reg_temp_callback) {
+		ret = host->ops->reg_temp_callback(host);
+	} else {
+		pr_err("%s: %s: couldn't find init temp control clk scaling cb\n",
+			mmc_hostname(host), __func__);
+		ret = -ENOCALLBACK;
+	}
+	return ret;
+}
+
+static int mmc_sd_dereg_temp_control_clk_scaling(struct mmc_host *host)
+{
+	int ret;
+
+	if (host->ops->dereg_temp_callback) {
+		ret = host->ops->dereg_temp_callback(host);
+	} else {
+		pr_err("%s: %s: couldn't find dereg temp control clk scaling cb\n",
+			mmc_hostname(host), __func__);
+		ret = -ENOCALLBACK;
+	}
+	return ret;
+}
+
 /*
  * Host is being removed. Free up the current card.
  */
@@ -1119,6 +1165,7 @@ static void mmc_sd_remove(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	mmc_exit_clk_scaling(host);
+	mmc_sd_dereg_temp_control_clk_scaling(host);
 	mmc_remove_card(host->card);
 
 	mmc_claim_host(host);
@@ -1131,6 +1178,9 @@ static void mmc_sd_remove(struct mmc_host *host)
  */
 static int mmc_sd_alive(struct mmc_host *host)
 {
+	if (host->ops->get_cd && !host->ops->get_cd(host))
+		return -ENOMEDIUM;
+
 	return mmc_send_status(host->card, NULL);
 }
 
@@ -1159,6 +1209,16 @@ static void mmc_sd_detect(struct mmc_host *host)
 		return;
 	}
 
+	if (mmc_bus_needs_resume(host))
+		mmc_resume_bus(host);
+
+	if (host->ops->get_cd && !host->ops->get_cd(host)) {
+		err = -ENOMEDIUM;
+		mmc_card_set_removed(host->card);
+		mmc_card_clr_suspended(host->card);
+		goto out;
+	}
+
 	/*
 	 * Just check if our card has been removed.
 	 */
@@ -1181,6 +1241,7 @@ static void mmc_sd_detect(struct mmc_host *host)
 	err = _mmc_detect_card_removed(host);
 #endif
 
+out:
 	mmc_put_card(host->card);
 
 	if (err) {
@@ -1264,6 +1325,11 @@ static int _mmc_sd_resume(struct mmc_host *host)
 
 	if (!mmc_card_suspended(host->card))
 		goto out;
+
+	if (host->ops->get_cd && !host->ops->get_cd(host)) {
+		mmc_card_clr_suspended(host->card);
+		goto out;
+	}
 
 	mmc_power_up(host, host->card->ocr);
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
@@ -1365,6 +1431,9 @@ static int mmc_sd_runtime_resume(struct mmc_host *host)
 
 static int mmc_sd_reset(struct mmc_host *host)
 {
+	if (host->ops->get_cd && !host->ops->get_cd(host))
+		return -ENOMEDIUM;
+
 	mmc_power_cycle(host, host->card->ocr);
 	return mmc_sd_init_card(host, host->card->ocr, host->card);
 }
@@ -1424,6 +1493,9 @@ int mmc_attach_sd(struct mmc_host *host)
 		goto err;
 	}
 
+	if (mmc_sd_init_temp_control_clk_scaling(host))
+		pr_err("%s: failed to init temp control clk scaling\n",
+			mmc_hostname(host));
 	/*
 	 * Detect and init the card.
 	 */

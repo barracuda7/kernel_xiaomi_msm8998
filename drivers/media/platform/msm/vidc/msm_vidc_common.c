@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -712,16 +712,16 @@ static void handle_sys_init_done(enum hal_command_response cmd, void *data)
 	return;
 }
 
+static void put_inst_helper(struct kref *kref)
+{
+	struct msm_vidc_inst *inst = container_of(kref, struct msm_vidc_inst,
+			kref);
+
+	msm_vidc_destroy(inst);
+}
+
 static void put_inst(struct msm_vidc_inst *inst)
 {
-	void put_inst_helper(struct kref *kref)
-	{
-		struct msm_vidc_inst *inst = container_of(kref,
-				struct msm_vidc_inst, kref);
-
-		msm_vidc_destroy(inst);
-	}
-
 	if (!inst)
 		return;
 
@@ -1210,6 +1210,20 @@ static void handle_event_change(enum hal_command_response cmd, void *data)
 		break;
 	}
 
+	/*
+	 * Force output to linear format if it's interlaced UBWC format
+	 * to support interlaced clips playback
+	 */
+	if ((inst->allow_ubwc_linear_event) &&
+		(event_notify->pic_struct ==
+			MSM_VIDC_PIC_STRUCT_MAYBE_INTERLACED)) {
+		u32 fmt_fourcc = inst->fmts[CAPTURE_PORT].fourcc;
+
+		if ((fmt_fourcc == V4L2_PIX_FMT_NV12_TP10_UBWC) ||
+			(fmt_fourcc == V4L2_PIX_FMT_NV12_UBWC))
+			inst->fmts[CAPTURE_PORT].fourcc = V4L2_PIX_FMT_NV12;
+	}
+
 	/* Bit depth and pic struct changed event are combined into a single
 	 * event (insufficient event) for the userspace. Currently bitdepth
 	 * changes is only for HEVC and interlaced support is for all
@@ -1478,7 +1492,7 @@ void validate_output_buffers(struct msm_vidc_inst *inst)
 	}
 	mutex_lock(&inst->outputbufs.lock);
 	list_for_each_entry(binfo, &inst->outputbufs.list, list) {
-		if (binfo->buffer_ownership != DRIVER) {
+		if (binfo && binfo->buffer_ownership != DRIVER) {
 			dprintk(VIDC_DBG,
 				"This buffer is with FW %pa\n",
 				&binfo->handle->device_addr);
@@ -2061,6 +2075,7 @@ static void handle_fbd(enum hal_command_response cmd, void *data)
 	int extra_idx = 0;
 	int64_t time_usec = 0;
 	struct vb2_v4l2_buffer *vbuf = NULL;
+	struct buffer_info *buffer_info = NULL;
 
 	if (!response) {
 		dprintk(VIDC_ERR, "Invalid response from vidc_hal\n");
@@ -2102,6 +2117,26 @@ static void handle_fbd(enum hal_command_response cmd, void *data)
 				"fbd:Overflow bytesused = %d; length = %d\n",
 				vb->planes[0].bytesused,
 				vb->planes[0].length);
+
+		buffer_info = device_to_uvaddr(&inst->registeredbufs,
+			fill_buf_done->packet_buffer1);
+
+		if (!buffer_info) {
+			dprintk(VIDC_ERR,
+				"%s buffer not found in registered list\n",
+				__func__);
+			return;
+		}
+
+		buffer_info->crop_data.nLeft = fill_buf_done->start_x_coord;
+		buffer_info->crop_data.nTop = fill_buf_done->start_y_coord;
+		buffer_info->crop_data.nWidth = fill_buf_done->frame_width;
+		buffer_info->crop_data.nHeight = fill_buf_done->frame_height;
+		buffer_info->crop_data.width_height[0] =
+						inst->prop.width[CAPTURE_PORT];
+		buffer_info->crop_data.width_height[1] =
+						inst->prop.height[CAPTURE_PORT];
+
 		if (!(fill_buf_done->flags1 &
 			HAL_BUFFERFLAG_TIMESTAMPINVALID)) {
 			time_usec = fill_buf_done->timestamp_hi;
@@ -2614,6 +2649,7 @@ int msm_comm_check_core_init(struct msm_vidc_core *core)
 	int rc = 0;
 	struct hfi_device *hdev;
 	struct msm_vidc_inst *inst = NULL;
+	int dref = 0;
 
 	mutex_lock(&core->lock);
 	if (core->state >= VIDC_CORE_INIT_DONE) {
@@ -2637,11 +2673,16 @@ int msm_comm_check_core_init(struct msm_vidc_core *core)
 		 * Just grab one of the inst from instances list and
 		 * use it.
 		 */
-		inst = list_first_entry(&core->instances,
+		inst = list_first_entry_or_null(&core->instances,
 			struct msm_vidc_inst, list);
+		if (inst)
+			dref = kref_get_unless_zero(&inst->kref);
 
 		mutex_unlock(&core->lock);
-		msm_comm_print_debug_info(inst);
+		if (dref) {
+			msm_comm_print_debug_info(inst);
+			put_inst(inst);
+		}
 		mutex_lock(&core->lock);
 
 		BUG_ON(msm_vidc_debug_timeout);
@@ -3169,8 +3210,7 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 			if (!handle) {
 				dprintk(VIDC_ERR,
 					"Failed to allocate output memory\n");
-				rc = -ENOMEM;
-				goto err_no_mem;
+				return -ENOMEM;
 			}
 			rc = msm_comm_smem_cache_operations(inst,
 					handle, SMEM_CACHE_CLEAN, -1);
@@ -3222,10 +3262,9 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 	}
 	return rc;
 fail_set_buffers:
-	msm_comm_smem_free(inst, handle);
-err_no_mem:
 	kfree(binfo);
 fail_kzalloc:
+	msm_comm_smem_free(inst, handle);
 	return rc;
 }
 
@@ -3817,17 +3856,20 @@ int msm_comm_qbuf(struct msm_vidc_inst *inst, struct vb2_buffer *vb)
 	 * Don't queue if:
 	 * 1) Hardware isn't ready (that's simple)
 	 */
-	defer = defer ?: inst->state != MSM_VIDC_START_DONE;
+	if (!defer)
+		defer = inst->state != MSM_VIDC_START_DONE;
 
 	/*
 	 * 2) The client explicitly tells us not to because it wants this
 	 * buffer to be batched with future frames.  The batch size (on both
 	 * capabilities) is completely determined by the client.
 	 */
-	defer = defer ?: vbuf && vbuf->flags & V4L2_MSM_BUF_FLAG_DEFER;
+	if (!defer)
+		defer = vbuf && vbuf->flags & V4L2_MSM_BUF_FLAG_DEFER;
 
 	/* 3) If we're in batch mode, we must have full batches of both types */
-	defer = defer ?: batch_mode && (!output_count || !capture_count);
+	if (!defer)
+		defer = batch_mode && (!output_count || !capture_count);
 
 	if (defer) {
 		dprintk(VIDC_DBG, "Deferring queue of %pK\n", vb);

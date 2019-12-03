@@ -796,6 +796,7 @@ struct vfe_device {
 	enum cam_ahb_clk_vote ahb_vote;
 	enum cam_ahb_clk_vote user_requested_ahb_vote;
 	struct cx_ipeak_client *vfe_cx_ipeak;
+	int cx_ipeak_bit;
 
 	/* Sync variables*/
 	struct completion reset_complete;
@@ -804,7 +805,8 @@ struct vfe_device {
 	struct mutex core_mutex;
 	spinlock_t shared_data_lock;
 	spinlock_t reg_update_lock;
-	spinlock_t completion_lock;
+	spinlock_t reset_completion_lock;
+	spinlock_t halt_completion_lock;
 
 	/* Tasklet info */
 	atomic_t irq_cnt;

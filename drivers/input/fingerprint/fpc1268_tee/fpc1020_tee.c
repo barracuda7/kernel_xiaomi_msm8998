@@ -58,7 +58,6 @@
 static const char * const pctl_names[] = {
 	"fpc1020_reset_reset",
 	"fpc1020_reset_active",
-	"fpc1020_irq_active",
 };
 
 struct vreg_config {
@@ -68,7 +67,7 @@ struct vreg_config {
 	int ua_load;
 };
 
-static const struct vreg_config const vreg_conf[] = {
+static const struct vreg_config vreg_conf[] = {
 	{ "vdd_ana", 1800000UL, 1800000UL, 6000, },
 };
 
@@ -86,9 +85,7 @@ struct fpc1020_data {
 	bool prepared;
 	atomic_t wakeup_enabled; /* Used both in ISR and non-ISR */
 	int irqf;
-
 	struct input_handler input_handler;
-	bool report_key_events;
 };
 
 static irqreturn_t fpc1020_irq_handler(int irq, void *handle);
@@ -105,10 +102,9 @@ static int input_connect(struct input_handler *handler,
 	if (!strstr(dev->name, "uinput-fpc"))
 		return -ENODEV;
 
-	handle = kmalloc(sizeof(struct input_handle), GFP_KERNEL);
+	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
 	if (!handle)
 		return -ENOMEM;
-	memset(handle, 0, sizeof(*handler));
 
 	handle->dev = dev;
 	handle->handler = handler;
@@ -132,12 +128,12 @@ err_input_register_handle:
 	return rc;
 }
 
+extern bool capacitive_keys_enabled;
+
 static bool input_filter(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
-	struct fpc1020_data *fpc1020 = handle->private;
-
-	return !fpc1020->report_key_events;
+	return !capacitive_keys_enabled;
 }
 
 static void input_disconnect(struct input_handle *handle)
@@ -191,11 +187,12 @@ found:
 			vreg = NULL;
 		}
 		fpc1020->vreg[i] = vreg;
+		dev_err(dev, "fp_vdd_vreg is enabled!\n");
 	} else {
 		if (vreg) {
 			if (regulator_is_enabled(vreg)) {
 				regulator_disable(vreg);
-				dev_dbg(dev, "disabled %s\n", name);
+				dev_err(dev, "disabled %s\n", name);
 			}
 			regulator_put(vreg);
 			fpc1020->vreg[i] = NULL;
@@ -223,32 +220,6 @@ static ssize_t clk_enable_set(struct device *dev,
 	return count;
 }
 static DEVICE_ATTR(clk_enable, S_IWUSR, NULL, clk_enable_set);
-
-static ssize_t enable_key_events_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%d\n", fpc1020->report_key_events);
-}
-
-static ssize_t enable_key_events_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	int rc;
-	unsigned long input;
-	struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
-
-	rc = kstrtoul(buf, 0, &input);
-	if (rc < 0)
-		return rc;
-
-	fpc1020->report_key_events = !!input;
-
-	return count;
-}
-static DEVICE_ATTR(enable_key_events, S_IWUSR | S_IRUSR, enable_key_events_show,
-		   enable_key_events_store);
 
 /**
  * Will try to select the set of pins (GPIOS) defined in a pin control node of
@@ -307,23 +278,22 @@ static ssize_t regulator_enable_set(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
-	char op;
-	char name[16];
-	int rc;
-	bool enable;
+	int rc = 0;
 
-	if (NUM_PARAMS_REG_ENABLE_SET != sscanf(buf, "%15[^,],%c", name, &op))
-		return -EINVAL;
-	if (op == 'e')
-		enable = true;
-	else if (op == 'd')
-		enable = false;
-	else
-		return -EINVAL;
-
-	mutex_lock(&fpc1020->lock);
-	rc = vreg_setup(fpc1020, name, enable);
-	mutex_unlock(&fpc1020->lock);
+	if (!strncmp(buf, "e", strlen("e"))) {
+		mutex_lock(&fpc1020->lock);
+		rc = vreg_setup(fpc1020, "fp_vdd_vreg", true);
+		mutex_unlock(&fpc1020->lock);
+		dev_err(dev, "enable fp_vdd_vreg!, rc = %d\n", rc);
+	} else if (!strncmp(buf, "d", strlen("d"))) {
+		mutex_lock(&fpc1020->lock);
+		rc = vreg_setup(fpc1020, "fp_vdd_vreg", false);
+		mutex_unlock(&fpc1020->lock);
+		dev_err(dev, "disable fp_vdd_vreg!, rc = %d\n", rc);
+	} else {
+		dev_err(dev, "operation disable!\n");
+		rc = 1;
+	}
 
 	return rc ? rc : count;
 }
@@ -393,11 +363,6 @@ static int device_prepare(struct fpc1020_data *fpc1020, bool enable)
 
 	mutex_lock(&fpc1020->lock);
 	if (enable && !fpc1020->prepared) {
-		rc = select_pin_ctl(fpc1020, "fpc1020_irq_active");
-		if (rc) {
-			pr_err("irq gpio set active failed\n");
-			goto exit;
-		}
 
 		rc = fpc1020_request_named_gpio(fpc1020, "fpc,gpio_irq",
 					&fpc1020->irq_gpio);
@@ -405,12 +370,7 @@ static int device_prepare(struct fpc1020_data *fpc1020, bool enable)
 			pr_err("irq gpio request failed\n");
 			goto exit;
 		}
-		rc = fpc1020_request_named_gpio(fpc1020, "fpc,gpio_rst",
-					&fpc1020->rst_gpio);
-		if (rc) {
-			pr_err("reset gpio request failed\n");
-			goto irq_gpio_exit;
-		}
+
 		rc = devm_request_threaded_irq(dev, gpio_to_irq(fpc1020->irq_gpio),
 				NULL, fpc1020_irq_handler, fpc1020->irqf,
 				dev_name(dev), fpc1020);
@@ -450,8 +410,7 @@ free_irq_exit:
 		disable_irq(gpio_to_irq(fpc1020->irq_gpio));
 		devm_free_irq(dev, gpio_to_irq(fpc1020->irq_gpio), fpc1020);
 rst_gpio_exit:
-		devm_gpio_free(dev, fpc1020->rst_gpio);
-irq_gpio_exit:
+
 		devm_gpio_free(dev, fpc1020->irq_gpio);
 exit:
 		fpc1020->prepared = false;
@@ -496,6 +455,7 @@ static ssize_t wakeup_enable_set(struct device *dev,
 	ssize_t ret = count;
 
 	mutex_lock(&fpc1020->lock);
+
 	mutex_unlock(&fpc1020->lock);
 
 	return ret;
@@ -558,7 +518,6 @@ static DEVICE_ATTR(irq_enable, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP , NULL, irq
 static struct attribute *attributes[] = {
 	&dev_attr_pinctl_set.attr,
 	&dev_attr_device_prepare.attr,
-	&dev_attr_enable_key_events.attr,
 	&dev_attr_regulator_enable.attr,
 	&dev_attr_hw_reset.attr,
 	&dev_attr_wakeup_enable.attr,
@@ -665,13 +624,11 @@ static int fpc1020_probe(struct platform_device *pdev)
 
 	atomic_set(&fpc1020->wakeup_enabled, 1);
 
-	fpc1020->irqf = IRQF_TRIGGER_RISING | IRQF_ONESHOT | IRQF_NO_SUSPEND;
-	device_init_wakeup(dev, 1);
+	fpc1020->irqf = IRQF_TRIGGER_RISING | IRQF_ONESHOT | IRQF_PERF_CRITICAL | IRQF_NO_SUSPEND;
+
 	mutex_init(&fpc1020->lock);
 
 	wake_lock_init(&fpc1020->ttw_wl, WAKE_LOCK_SUSPEND, "fpc_ttw_wl");
-
-	fpc1020->report_key_events = true;
 
 	fpc1020->input_handler.filter = input_filter;
 	fpc1020->input_handler.connect = input_connect;
@@ -694,7 +651,9 @@ static int fpc1020_probe(struct platform_device *pdev)
 		dev_info(dev, "Enabling hardware\n");
 		(void)device_prepare(fpc1020, true);
 	}
+
 	dev_info(dev, "%s: ok\n", __func__);
+
 exit:
 	return rc;
 }
@@ -707,6 +666,7 @@ static int fpc1020_remove(struct platform_device *pdev)
 	mutex_destroy(&fpc1020->lock);
 	wake_lock_destroy(&fpc1020->ttw_wl);
 	(void)vreg_setup(fpc1020, "vdd_ana", false);
+
 	dev_info(&pdev->dev, "%s\n", __func__);
 
 	return 0;

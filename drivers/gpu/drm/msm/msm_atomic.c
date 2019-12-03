@@ -95,8 +95,13 @@ static void msm_atomic_wait_for_commit_done(
 		if (old_state->legacy_cursor_update)
 			continue;
 
+		if (drm_crtc_vblank_get(crtc))
+			continue;
+
 		if (kms->funcs->wait_for_crtc_commit_done)
 			kms->funcs->wait_for_crtc_commit_done(kms, crtc);
+
+		drm_crtc_vblank_put(crtc);
 	}
 }
 
@@ -563,7 +568,7 @@ int msm_atomic_commit(struct drm_device *dev,
 	int i, ret;
 
 	if (!priv || priv->shutdown_in_progress) {
-		DRM_ERROR("priv is null or shutdown is in-progress\n");
+		DRM_ERROR("priv is null or shutdwon is in-progress\n");
 		return -EINVAL;
 	}
 

@@ -4,8 +4,9 @@
 #include <linux/kernel_stat.h>
 #include <linux/static_key.h>
 #include <linux/context_tracking.h>
-#include <linux/cpufreq.h>
+#include <linux/cpufreq_times.h>
 #include "sched.h"
+#include "walt.h"
 
 
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
@@ -79,9 +80,12 @@ void irqtime_account_irq(struct task_struct *curr)
 
 	irq_time_write_end();
 
-	if (account)
+	if (account) {
+#ifdef CONFIG_SCHED_WALT
+		walt_account_irqtime(cpu, curr, delta, wallclock);
+#endif
 		sched_account_irqtime(cpu, curr, delta, wallclock);
-	else if (curr != this_cpu_ksoftirqd())
+	} else if (curr != this_cpu_ksoftirqd())
 		sched_account_irqstart(cpu, curr, wallclock);
 
 	local_irq_restore(flags);
@@ -162,10 +166,8 @@ void account_user_time(struct task_struct *p, cputime_t cputime,
 	/* Account for user time used */
 	acct_account_cputime(p);
 
-#ifdef CONFIG_CPU_FREQ_STAT
-	/* Account power usage for system time */
-	acct_update_power(p, cputime);
-#endif
+	/* Account power usage for user time */
+	cpufreq_acct_update_power(p, cputime);
 }
 
 /*
@@ -217,10 +219,8 @@ void __account_system_time(struct task_struct *p, cputime_t cputime,
 	/* Account for system time used */
 	acct_account_cputime(p);
 
-#ifdef CONFIG_CPU_FREQ_STAT
 	/* Account power usage for system time */
-	acct_update_power(p, cputime);
-#endif
+	cpufreq_acct_update_power(p, cputime);
 }
 
 /*

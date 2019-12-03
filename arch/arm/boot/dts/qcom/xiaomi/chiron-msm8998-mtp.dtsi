@@ -23,6 +23,7 @@
 #include "msm8998-blsp.dtsi"
 #include "msm8998-audio.dtsi"
 #include "msm8998-mdss.dtsi"
+#include "msm8998-common-mtp.dtsi"
 
 #include "chiron-camera-sensor-mtp.dtsi"
 
@@ -108,10 +109,6 @@
 	cd-gpios = <&tlmm 95 0x1>;
 
 	status = "ok";
-};
-
-&uartblsp2dm1 {
-	status = "disabled";
 };
 
 &pm8998_gpios {
@@ -391,15 +388,6 @@
 	qcom,peripheral-size = <0x500000>;
 };
 
-&pmi8998_haptics {
-	qcom,wave-play-rate-us = <4878>;
-	qcom,vmax-mv = <2552>;
-	qcom,wave-shape = "sine";
-	qcom,brake-pattern = [03 02 00 00];
-
-	status = "okay";
-};
-
 &pm8998_vadc {
 	chan@83 {
 		label = "vph_pwr";
@@ -626,7 +614,6 @@
 			"AMIC6", "MIC BIAS4",
 			"MIC BIAS4", "Analog Mic6";
 
-		qcom,wsa-max-devs = <0>;
 		qcom,msm-mbhc-hphl-swh = <1>;
 
 		qcom,asel-gpio = <&tlmm 91 0x00>;
@@ -742,26 +729,6 @@
 	qcom,fs-curr-ua = <20000>;
 	qcom,en-cabc;
 	qcom,ovp-mv = <19600>;
-};
-
-&red_led { /* Notification LED */
-	qcom,use-blink;
-	qcom,start-idx = <0>;
-	qcom,idx-len = <8>;
-	qcom,duty-pcts = [ 00 0E 1C 2A 38 46 54 64 ];
-	qcom,lut-flags = <31>; /* loop, ramp up, reverse, pause hi, pause lo */
-	qcom,pause-lo = <500>;
-	qcom,pause-hi = <500>;
-	qcom,ramp-step-ms = <50>;
-	linux,name = "white";
-};
-
-&blue_led { /* Left button backlight */
-	linux,name = "button-backlight";
-};
-
-&green_led { /* Right button backlight */
-	linux,name = "button-backlight1";
 };
 
 &pmi8998_charger {

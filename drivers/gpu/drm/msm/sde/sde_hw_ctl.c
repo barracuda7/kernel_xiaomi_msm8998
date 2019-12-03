@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -258,6 +258,57 @@ static inline int sde_hw_ctl_get_bitmask_cdm(struct sde_hw_ctl *ctx,
 	return 0;
 }
 
+static inline void sde_hw_ctl_get_splash_mixer_mask(const u32 *resv_pipes,
+				u32 length, u32 *mixercfg, u32 *mixercfg_ext)
+{
+	int i = 0;
+	u32 mixer_mask = 0;
+	u32 mixer_ext_mask = 0;
+
+	for (i = 0; i < length; i++) {
+		/* LK's splash VIG layer always stays on second top */
+		/*  most layerearly HMI RGB layer stays at top most layer */
+		switch (resv_pipes[i]) {
+		case SSPP_VIG0:
+			mixer_mask |= 0x7 << 0;
+			mixer_ext_mask |= BIT(0);
+			break;
+		case SSPP_VIG1:
+			mixer_mask |= 0x7 << 3;
+			mixer_ext_mask |= BIT(2);
+			break;
+		case SSPP_VIG2:
+			mixer_mask |= 0x7 << 6;
+			mixer_ext_mask |= BIT(4);
+			break;
+		case SSPP_VIG3:
+			mixer_mask |= 0x7 << 26;
+			mixer_ext_mask |= BIT(6);
+			break;
+		case SSPP_RGB0:
+			mixer_mask |= 0x7 << 9;
+			mixer_ext_mask |= BIT(8);
+			break;
+		case SSPP_RGB1:
+			mixer_mask |= 0x7 << 12;
+			mixer_ext_mask |= BIT(10);
+			break;
+		case SSPP_RGB2:
+			mixer_mask |= 0x7 << 15;
+			mixer_ext_mask |= BIT(12);
+			break;
+		case SSPP_RGB3:
+			mixer_mask |= 0x7 << 29;
+			mixer_ext_mask |= BIT(14);
+			break;
+		default:
+			break;
+		}
+	}
+	*mixercfg = mixer_mask;
+	*mixercfg_ext = mixer_ext_mask;
+}
+
 static u32 sde_hw_ctl_poll_reset_status(struct sde_hw_ctl *ctx, u32 count)
 {
 	struct sde_hw_blk_reg_map *c = &ctx->hw;
@@ -312,26 +363,50 @@ static int sde_hw_ctl_wait_reset_status(struct sde_hw_ctl *ctx)
 	return 0;
 }
 
-static void sde_hw_ctl_clear_all_blendstages(struct sde_hw_ctl *ctx)
+static void sde_hw_ctl_clear_all_blendstages(struct sde_hw_ctl *ctx,
+		bool handoff, const u32 *resv_pipes, u32 resv_pipes_length)
 {
 	struct sde_hw_blk_reg_map *c = &ctx->hw;
 	int i;
+	u32 mixercfg = 0;
+	u32 mixercfg_ext = 0;
+	u32 mixer_mask, mixerext_mask;
+	int mixer_id;
 
 	for (i = 0; i < ctx->mixer_count; i++) {
-		int mixer_id = ctx->mixer_hw_caps[i].id;
+		mixer_id = ctx->mixer_hw_caps[i].id;
 
-		SDE_REG_WRITE(c, CTL_LAYER(mixer_id), 0);
-		SDE_REG_WRITE(c, CTL_LAYER_EXT(mixer_id), 0);
+		/*
+		 * if bootloaer still has early RVC running, mixer status
+		 * can't be direcly cleared.
+		 */
+		if (handoff) {
+			/*
+			 * if bootloaer still has early display or early RVC
+			 * running,mixer status can't be direcly cleared.
+			 */
+			mixercfg = SDE_REG_READ(c, CTL_LAYER(mixer_id));
+			mixercfg_ext = SDE_REG_READ(c,
+				CTL_LAYER_EXT(mixer_id));
+			sde_hw_ctl_get_splash_mixer_mask(resv_pipes,
+				resv_pipes_length, &mixer_mask, &mixerext_mask);
+			mixercfg &= mixer_mask;
+			mixercfg_ext &= mixerext_mask;
+		}
+		SDE_REG_WRITE(c, CTL_LAYER(mixer_id), mixercfg);
+		SDE_REG_WRITE(c, CTL_LAYER_EXT(mixer_id), mixercfg_ext);
 		SDE_REG_WRITE(c, CTL_LAYER_EXT2(mixer_id), 0);
 		SDE_REG_WRITE(c, CTL_LAYER_EXT3(mixer_id), 0);
 	}
 }
 
 static void sde_hw_ctl_setup_blendstage(struct sde_hw_ctl *ctx,
-	enum sde_lm lm, struct sde_hw_stage_cfg *stage_cfg, u32 index)
+	enum sde_lm lm, struct sde_hw_stage_cfg *stage_cfg, u32 index,
+	bool handoff, const u32 *resv_pipes, u32 resv_pipes_length)
 {
 	struct sde_hw_blk_reg_map *c = &ctx->hw;
 	u32 mixercfg, mixercfg_ext, mix, ext, mixercfg_ext2;
+	u32 mixer_mask, mixerext_mask;
 	int i, j;
 	u8 stages;
 	int pipes_per_stage;
@@ -352,6 +427,20 @@ static void sde_hw_ctl_setup_blendstage(struct sde_hw_ctl *ctx,
 	mixercfg = BIT(24); /* always set BORDER_OUT */
 	mixercfg_ext = 0;
 	mixercfg_ext2 = 0;
+
+	/*
+	 * if bootloader still have RVC running, its mixer stauts
+	 * should be updated to kernel's mixer setup.
+	 */
+	if (handoff) {
+		mixercfg = SDE_REG_READ(c, CTL_LAYER(lm));
+		mixercfg_ext = SDE_REG_READ(c, CTL_LAYER_EXT(lm));
+		sde_hw_ctl_get_splash_mixer_mask(resv_pipes,
+				resv_pipes_length, &mixer_mask, &mixerext_mask);
+		mixercfg &= mixer_mask;
+		mixercfg_ext &= mixerext_mask;
+		mixercfg |= BIT(24);
+	}
 
 	for (i = 0; i <= stages; i++) {
 		/* overflow to ext register if 'i + 1 > 7' */
@@ -458,6 +547,38 @@ static void sde_hw_ctl_intf_cfg(struct sde_hw_ctl *ctx,
 	SDE_REG_WRITE(c, CTL_TOP, intf_cfg);
 }
 
+static inline u32 sde_hw_ctl_read_ctl_top_for_splash(struct sde_hw_ctl *ctx)
+{
+	struct sde_hw_blk_reg_map *c;
+	u32 ctl_top;
+
+	if (!ctx) {
+		pr_err("Invalid ctx\n");
+		return 0;
+	}
+
+	c = &ctx->hw;
+	ctl_top = SDE_REG_READ(c, CTL_TOP);
+	return ctl_top;
+}
+
+static inline u32 sde_hw_ctl_read_ctl_layers_for_splash(struct sde_hw_ctl *ctx,
+							int index)
+{
+	struct sde_hw_blk_reg_map *c;
+	u32 ctl_top;
+
+	if (!ctx) {
+		pr_err("Invalid ctx\n");
+		return 0;
+	}
+
+	c = &ctx->hw;
+	ctl_top = SDE_REG_READ(c, CTL_LAYER(index));
+
+	return ctl_top;
+}
+
 static void _setup_ctl_ops(struct sde_hw_ctl_ops *ops,
 		unsigned long cap)
 {
@@ -478,6 +599,8 @@ static void _setup_ctl_ops(struct sde_hw_ctl_ops *ops,
 	ops->get_bitmask_intf = sde_hw_ctl_get_bitmask_intf;
 	ops->get_bitmask_cdm = sde_hw_ctl_get_bitmask_cdm;
 	ops->get_bitmask_wb = sde_hw_ctl_get_bitmask_wb;
+	ops->read_ctl_top_for_splash = sde_hw_ctl_read_ctl_top_for_splash;
+	ops->read_ctl_layers_for_splash = sde_hw_ctl_read_ctl_layers_for_splash;
 };
 
 struct sde_hw_ctl *sde_hw_ctl_init(enum sde_ctl idx,

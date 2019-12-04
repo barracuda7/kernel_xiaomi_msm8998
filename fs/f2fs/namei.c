@@ -10,7 +10,6 @@
 #include <linux/pagemap.h>
 #include <linux/sched.h>
 #include <linux/ctype.h>
-#include <linux/random.h>
 #include <linux/dcache.h>
 #include <linux/namei.h>
 #include <linux/quotaops.h>
@@ -51,7 +50,7 @@ static struct inode *f2fs_new_inode(struct inode *dir, umode_t mode)
 	inode->i_blocks = 0;
 	inode->i_mtime = inode->i_atime = inode->i_ctime =
 			F2FS_I(inode)->i_crtime = current_time(inode);
-	inode->i_generation = prandom_u32();
+	inode->i_generation = sbi->s_next_generation++;
 
 	if (S_ISDIR(inode->i_mode))
 		F2FS_I(inode)->i_current_depth = 1;
@@ -143,7 +142,7 @@ fail_drop:
 	return ERR_PTR(err);
 }
 
-static inline int is_extension_exist(const unsigned char *s, const char *sub)
+static int is_extension_exist(const unsigned char *s, const char *sub)
 {
 	size_t slen = strlen(s);
 	size_t sublen = strlen(sub);
@@ -386,8 +385,9 @@ static int __recover_dot_dentries(struct inode *dir, nid_t pino)
 	int err = 0;
 
 	if (f2fs_readonly(sbi->sb)) {
-		f2fs_info(sbi, "skip recovering inline_dots inode (ino:%lu, pino:%u) in readonly mountpoint",
-			  dir->i_ino, pino);
+		f2fs_msg(sbi->sb, KERN_INFO,
+			"skip recovering inline_dots inode (ino:%lu, pino:%u) "
+			"in readonly mountpoint", dir->i_ino, pino);
 		return 0;
 	}
 
@@ -480,8 +480,9 @@ static struct dentry *f2fs_lookup(struct inode *dir, struct dentry *dentry,
 	if (f2fs_encrypted_inode(dir) &&
 	    (S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode)) &&
 	    !fscrypt_has_permitted_context(dir, inode)) {
-		f2fs_warn(F2FS_I_SB(inode), "Inconsistent encryption contexts: %lu/%lu",
-			  dir->i_ino, inode->i_ino);
+		f2fs_msg(inode->i_sb, KERN_WARNING,
+			 "Inconsistent encryption contexts: %lu/%lu",
+			 dir->i_ino, inode->i_ino);
 		err = -EPERM;
 		goto out_iput;
 	}

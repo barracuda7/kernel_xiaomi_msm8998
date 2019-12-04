@@ -10,12 +10,8 @@
  * GNU General Public License for more details.
  */
 
-&android_vendor {
-	fsmgr_flags = "wait,slotselect,avb";
-};
-
-&android_vbmeta {
-	parts = "vbmeta,boot,system,vendor,dtbo";
+&vendor {
+	fsmgr_flags = "wait,slotselect,verify";
 };
 
 &peripheral_mem {

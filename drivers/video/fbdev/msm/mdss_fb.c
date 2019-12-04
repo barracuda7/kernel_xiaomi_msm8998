@@ -1,7 +1,7 @@
 /*
  * Core MDSS framebuffer driver.
  *
- * Copyright (c) 2008-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2018, The Linux Foundation. All rights reserved.
  * Copyright (C) 2007 Google Incorporated
  *
  * This software is licensed under the terms of the GNU General Public
@@ -46,6 +46,8 @@
 #include <linux/file.h>
 #include <linux/kthread.h>
 #include <linux/dma-buf.h>
+#include <linux/cpu_input_boost.h>
+#include <linux/devfreq_boost.h>
 #include <sync.h>
 #include <sw_sync.h>
 
@@ -55,6 +57,9 @@
 #include "mdss_debug.h"
 #include "mdss_smmu.h"
 #include "mdss_mdp.h"
+#ifdef CONFIG_MIUI
+#include "mdss_dsi.h"
+#endif
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MDSS_FB_NUM 3
@@ -510,6 +515,49 @@ static ssize_t mdss_mdp_show_blank_event(struct device *dev,
 	return ret;
 }
 
+#ifdef CONFIG_MIUI
+static ssize_t mdss_fb_set_dispparam(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	int param, ret;
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+	struct mdss_panel_data *pdata = dev_get_platdata(&mfd->pdev->dev);
+
+	sscanf(buf, "0x%x", &param);
+	pdata->panel_info.panel_paramstatus = param;
+	ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_DISPPARAM, NULL);
+
+	return size;
+}
+
+static ssize_t mdss_fb_get_dispparam(struct device *dev,
+		struct device_attribute *attr, char *pbuf)
+{
+	int ret = -1;
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+	struct mdss_panel_data *pdata = dev_get_platdata(&mfd->pdev->dev);
+
+	if (pbuf == NULL) {
+		pr_err("mdss_fb_get_dispparam buffer is NULL!\n");
+		return ret;
+	}
+
+	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata, panel_data);
+
+	if (ctrl) {
+		ret = strlen(ctrl->panel_read_data);
+		ret = ret > 255 ? 255 : ret;
+		if (ret > 0)
+			memcpy(pbuf, ctrl->panel_read_data, ret);
+	}
+
+	return ret;
+}
+#endif
+
 static void __mdss_fb_idle_notify_work(struct work_struct *work)
 {
 	struct delayed_work *dw = to_delayed_work(work);
@@ -518,11 +566,16 @@ static void __mdss_fb_idle_notify_work(struct work_struct *work)
 
 	/* Notify idle-ness here */
 	pr_debug("Idle timeout %dms expired!\n", mfd->idle_time);
-	if (mfd->idle_time)
-		sysfs_notify(&mfd->fbi->dev->kobj, NULL, "idle_notify");
-	mfd->idle_state = MDSS_FB_IDLE;
-}
 
+	mfd->idle_state = MDSS_FB_IDLE;
+	/*
+	 * idle_notify node events are used to reduce MDP load when idle,
+	 * this is not needed for command mode panels.
+	 */
+	if (mfd->idle_time && mfd->panel.type != MIPI_CMD_PANEL)
+		sysfs_notify(&mfd->fbi->dev->kobj, NULL, "idle_notify");
+	sysfs_notify(&mfd->fbi->dev->kobj, NULL, "idle_state");
+}
 
 static ssize_t mdss_fb_get_fps_info(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -582,6 +635,26 @@ static ssize_t mdss_fb_get_idle_notify(struct device *dev,
 		work_busy(&mfd->idle_notify_work.work) ? "no" : "yes");
 
 	return ret;
+}
+
+static ssize_t mdss_fb_get_idle_state(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = fbi->par;
+	const char *state_strs[] = {
+		[MDSS_FB_NOT_IDLE] = "active",
+		[MDSS_FB_IDLE_TIMER_RUNNING] = "pending",
+		[MDSS_FB_IDLE] = "idle",
+	};
+	int state = mfd->idle_state;
+	const char *s;
+	if (state < ARRAY_SIZE(state_strs) && state_strs[state])
+		s = state_strs[state];
+	else
+		s = "invalid";
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", s);
 }
 
 static ssize_t mdss_fb_get_panel_info(struct device *dev,
@@ -913,13 +986,153 @@ static ssize_t mdss_fb_idle_pc_notify(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "idle power collapsed\n");
 }
 
+#ifdef CONFIG_MIUI
+#define HWMON_CONPONENT_NAME "display"
+#define HWMON_KEY_ACTIVE "panel_active"
+#define HWMON_KEY_REFRESH "panel_refresh"
+#define HWMON_KEY_BOOTTIME "kernel_boottime"
+#define HWMON_KEY_DAYS "kernel_days"
+#define HWMON_KEY_BL_AVG "bl_level_avg"
+#define HWMON_KEY_BL_HIGH "bl_level_high"
+#define HWMON_KEY_BL_LOW "bl_level_low"
+#define DAY_SECS (60*60*24)
+
+static ssize_t mdss_fb_set_panel_count(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	u64 panel_active = 0;
+	u64 kickoff_count = 0;
+	u64 kernel_boottime = 0;
+	u64 kernel_rtctime = 0;
+	u64 kernel_days = 0;
+	u64 record_end = 0;
+	u32 delta_days = 0;
+	u64 bl_duration = 0;
+	u64 bl_level_integral = 0;
+	u64 bl_highlevel_duration = 0;
+	u64 bl_lowlevel_duration = 0;
+
+	ssize_t result;
+	struct timespec rtctime;
+
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+	struct mdss_panel_data *pdata = dev_get_platdata(&mfd->pdev->dev);
+
+	if (!mfd || !pdata) {
+		pr_err("%s: Panel info is NULL!\n", __func__);
+		return size;
+	}
+
+	result = sscanf(buf,
+		"panel_active=%llu\n"
+		"panel_kickoff_count=%llu\n"
+		"kernel_boottime=%llu\n"
+		"kernel_rtctime=%llu\n"
+		"kernel_days=%llu\n"
+		"bl_duration=%llu\n"
+		"bl_level_integral=%llu\n"
+		"bl_highlevel_duration=%llu\n"
+		"bl_lowlevel_duration=%llu\n"
+		"record_end=%llu\n",
+		&panel_active,
+		&kickoff_count,
+		&kernel_boottime,
+		&kernel_rtctime,
+		&kernel_days,
+		&bl_duration,
+		&bl_level_integral,
+		&bl_highlevel_duration,
+		&bl_lowlevel_duration,
+		&record_end);
+	if (result != 10) {
+		pr_err("sscanf buf error!\n");
+		return size;
+	}
+
+	mutex_lock(&mfd->mdss_sysfs_lock);
+	getnstimeofday(&rtctime);
+	if (rtctime.tv_sec > kernel_rtctime) {
+		if (rtctime.tv_sec - kernel_rtctime > 10 * 365 * DAY_SECS) {
+			pdata->panel_info.bootRTCtime = rtctime.tv_sec;
+		} else {
+			if (rtctime.tv_sec - kernel_rtctime > DAY_SECS) {
+				delta_days = (rtctime.tv_sec - kernel_rtctime) / DAY_SECS;
+				pdata->panel_info.bootRTCtime = rtctime.tv_sec - ((rtctime.tv_sec - kernel_rtctime) % DAY_SECS);
+			} else {
+				pdata->panel_info.bootRTCtime = kernel_rtctime;
+			}
+		}
+	} else {
+		pr_err("RTC time rollback!\n");
+		pdata->panel_info.bootRTCtime = kernel_rtctime;
+	}
+	mutex_unlock(&mfd->mdss_sysfs_lock);
+
+	return size;
+}
+
+static ssize_t mdss_fb_get_panel_count(struct device *dev,
+		struct device_attribute *attr, char *pbuf)
+{
+	int ret = -1;
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+	struct mdss_panel_data *pdata = dev_get_platdata(&mfd->pdev->dev);
+	struct timespec64 now_boot;
+	u64 record_end = 0;
+
+
+	if (!pdata) {
+		pr_err("no panel connected!\n");
+		return -EINVAL;
+	}
+
+	if (pbuf == NULL) {
+		pr_err("mdss_fb_get_dispparam buffer is NULL!\n");
+		return -EINVAL;
+	}
+
+	get_monotonic_boottime64(&now_boot);
+
+
+	ret = scnprintf(pbuf, PAGE_SIZE,
+		"panel_active=%llu\n"
+		"panel_kickoff_count=%llu\n"
+		"kernel_boottime=%llu\n"
+		"kernel_rtctime=%llu\n"
+		"kernel_days=%llu\n"
+		"bl_duration=%llu\n"
+		"bl_level_integral=%llu\n"
+		"bl_highlevel_duration=%llu\n"
+		"bl_lowlevel_duration=%llu\n"
+		"record_end=%llu\n",
+		pdata->panel_info.panel_active,
+		pdata->panel_info.kickoff_count,
+		pdata->panel_info.boottime + now_boot.tv_sec,
+		pdata->panel_info.bootRTCtime,
+		pdata->panel_info.bootdays,
+		pdata->panel_info.bl_duration,
+		pdata->panel_info.bl_level_integral,
+		pdata->panel_info.bl_highlevel_duration,
+		pdata->panel_info.bl_lowlevel_duration,
+		record_end);
+
+	return ret;
+}
+#endif
+
 static DEVICE_ATTR(msm_fb_type, S_IRUGO, mdss_fb_get_type, NULL);
+#ifdef CONFIG_MIUI
+static DEVICE_ATTR(msm_fb_dispparam, S_IRUGO | S_IWUSR, mdss_fb_get_dispparam, mdss_fb_set_dispparam);
+#endif
 static DEVICE_ATTR(msm_fb_split, S_IRUGO | S_IWUSR, mdss_fb_show_split,
 					mdss_fb_store_split);
 static DEVICE_ATTR(show_blank_event, S_IRUGO, mdss_mdp_show_blank_event, NULL);
 static DEVICE_ATTR(idle_time, S_IRUGO | S_IWUSR | S_IWGRP,
 	mdss_fb_get_idle_time, mdss_fb_set_idle_time);
 static DEVICE_ATTR(idle_notify, S_IRUGO, mdss_fb_get_idle_notify, NULL);
+static DEVICE_ATTR(idle_state, S_IRUGO, mdss_fb_get_idle_state, NULL);
 static DEVICE_ATTR(msm_fb_panel_info, S_IRUGO, mdss_fb_get_panel_info, NULL);
 static DEVICE_ATTR(msm_fb_src_split_info, S_IRUGO, mdss_fb_get_src_split_info,
 	NULL);
@@ -934,13 +1147,21 @@ static DEVICE_ATTR(measured_fps, S_IRUGO | S_IWUSR | S_IWGRP,
 static DEVICE_ATTR(msm_fb_persist_mode, S_IRUGO | S_IWUSR,
 	mdss_fb_get_persist_mode, mdss_fb_change_persist_mode);
 static DEVICE_ATTR(idle_power_collapse, S_IRUGO, mdss_fb_idle_pc_notify, NULL);
+#ifdef CONFIG_MIUI
+static DEVICE_ATTR(msm_fb_count, S_IRUGO | S_IWUSR,
+	mdss_fb_get_panel_count, mdss_fb_set_panel_count);
+#endif
 
 static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
+#ifdef CONFIG_MIUI
+	&dev_attr_msm_fb_dispparam.attr,
+#endif
 	&dev_attr_msm_fb_split.attr,
 	&dev_attr_show_blank_event.attr,
 	&dev_attr_idle_time.attr,
 	&dev_attr_idle_notify.attr,
+	&dev_attr_idle_state.attr,
 	&dev_attr_msm_fb_panel_info.attr,
 	&dev_attr_msm_fb_src_split_info.attr,
 	&dev_attr_msm_fb_thermal_level.attr,
@@ -949,6 +1170,9 @@ static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_measured_fps.attr,
 	&dev_attr_msm_fb_persist_mode.attr,
 	&dev_attr_idle_power_collapse.attr,
+#ifdef CONFIG_MIUI
+	&dev_attr_msm_fb_count.attr,
+#endif
 	NULL,
 };
 
@@ -1802,7 +2026,7 @@ static int mdss_fb_start_disp_thread(struct msm_fb_data_type *mfd)
 	mdss_fb_get_split(mfd);
 
 	atomic_set(&mfd->commits_pending, 0);
-	mfd->disp_thread = kthread_run(__mdss_fb_display_thread,
+	mfd->disp_thread = kthread_run_perf_critical(__mdss_fb_display_thread,
 				mfd, "mdss_fb%d", mfd->index);
 
 	if (IS_ERR(mfd->disp_thread)) {
@@ -3131,14 +3355,18 @@ static int __mdss_fb_sync_buf_done_callback(struct notifier_block *p,
 			ret = __mdss_fb_wait_for_fence_sub(sync_pt_data,
 				sync_pt_data->temp_fen, fence_cnt);
 		}
-		if (mfd->idle_time && !mod_delayed_work(system_wq,
+		if (mfd->idle_time) {
+			if (!mod_delayed_work(system_wq,
 					&mfd->idle_notify_work,
 					msecs_to_jiffies(mfd->idle_time)))
-			pr_debug("fb%d: restarted idle work\n",
-					mfd->index);
+				pr_debug("fb%d: restarted idle work\n",
+						mfd->index);
+			mfd->idle_state = MDSS_FB_IDLE_TIMER_RUNNING;
+		} else {
+			mfd->idle_state = MDSS_FB_IDLE;
+		}
 		if (ret == -ETIME)
 			ret = NOTIFY_BAD;
-		mfd->idle_state = MDSS_FB_IDLE_TIMER_RUNNING;
 		break;
 	case MDP_NOTIFY_FRAME_FLUSHED:
 		pr_debug("%s: frame flushed\n", sync_pt_data->fence_name);
@@ -4662,7 +4890,6 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	struct mdp_destination_scaler_data __user *ds_data_user;
 	struct msm_fb_data_type *mfd;
 	struct mdss_overlay_private *mdp5_data = NULL;
-	struct mdss_data_type *mdata;
 
 	ret = copy_from_user(&commit, argp, sizeof(struct mdp_layer_commit));
 	if (ret) {
@@ -4765,13 +4992,6 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	ds_data_user = commit.commit_v1.dest_scaler;
 	if ((ds_data_user) &&
 		(commit.commit_v1.dest_scaler_cnt)) {
-		mdata = mfd_to_mdata(mfd);
-		if (!mdata || !mdata->scaler_off ||
-				 !mdata->scaler_off->has_dest_scaler) {
-			pr_err("dest scaler not supported\n");
-			ret = -EPERM;
-			goto err;
-		}
 		ret = __mdss_fb_copy_destscaler_data(info, &commit);
 		if (ret) {
 			pr_err("copy dest scaler failed\n");
@@ -5057,6 +5277,8 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 		ret = mdss_fb_mode_switch(mfd, dsi_mode);
 		break;
 	case MSMFB_ATOMIC_COMMIT:
+		cpu_input_boost_kick();
+		devfreq_boost_kick(DEVFREQ_MSM_CPUBW);
 		ret = mdss_fb_atomic_commit_ioctl(info, argp, file);
 		break;
 

@@ -326,14 +326,13 @@ static void arch_counter_set_user_access(void)
 {
 	u32 cntkctl = arch_timer_get_cntkctl();
 
-	/* Disable user access to the timers and the physical counter */
+	/* Disable user access to the timers */
 	/* Also disable virtual event stream */
 	cntkctl &= ~(ARCH_TIMER_USR_PT_ACCESS_EN
-			| ARCH_TIMER_VIRT_EVT_EN
-			| ARCH_TIMER_USR_PCT_ACCESS_EN);
+			| ARCH_TIMER_VIRT_EVT_EN);
 
-	/* Enable user access to the virtual counter */
-	cntkctl |= ARCH_TIMER_USR_VT_ACCESS_EN;
+	/* Enable user access to the virtual and physical counters */
+	cntkctl |= ARCH_TIMER_USR_PCT_ACCESS_EN | ARCH_TIMER_USR_VT_ACCESS_EN;
 
 	if (IS_ENABLED(CONFIG_ARM_ARCH_TIMER_VCT_ACCESS))
 		cntkctl |= ARCH_TIMER_USR_VCT_ACCESS_EN;
@@ -752,7 +751,7 @@ CLOCKSOURCE_OF_DECLARE(armv8_arch_timer, "arm,armv8-timer", arch_timer_of_init);
 static void __init arch_timer_mem_init(struct device_node *np)
 {
 	struct device_node *frame, *best_frame = NULL;
-	void __iomem *cntctlbase, *base = NULL;
+	void __iomem *cntctlbase, *base;
 	unsigned int irq;
 	u32 cnttidr;
 
@@ -790,8 +789,7 @@ static void __init arch_timer_mem_init(struct device_node *np)
 		best_frame = of_node_get(frame);
 	}
 
-	if (best_frame)
-		base = arch_counter_base = of_iomap(best_frame, 0);
+	base = arch_counter_base = of_iomap(best_frame, 0);
 	if (!base) {
 		pr_err("arch_timer: Can't map frame's registers\n");
 		of_node_put(best_frame);

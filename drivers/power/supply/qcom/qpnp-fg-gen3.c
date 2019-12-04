@@ -408,6 +408,8 @@ module_param_named(
 static int fg_restart;
 static bool fg_sram_dump;
 
+#define FG_RATE_LIM_MS (5 * MSEC_PER_SEC)
+
 /* All getters HERE */
 
 #define VOLTAGE_15BIT_MASK	GENMASK(14, 0)
@@ -2572,6 +2574,86 @@ static void fg_ttf_update(struct fg_chip *chip)
 	schedule_delayed_work(&chip->ttf_work, msecs_to_jiffies(delay_ms));
 }
 
+static ssize_t fg_get_cycle_counts_bins(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+	int rc = 0, i;
+	u8 data[2];
+	int length = 0;
+
+	mutex_lock(&chip->cyc_ctr.lock);
+	for (i = 0; i < BUCKET_COUNT; i++) {
+		rc = fg_sram_read(chip, CYCLE_COUNT_WORD + (i / 2),
+				  CYCLE_COUNT_OFFSET + (i % 2) * 2, data, 2,
+				  FG_IMA_DEFAULT);
+
+		if (rc < 0) {
+			pr_err("failed to read bucket %d rc=%d\n", i, rc);
+			chip->cyc_ctr.count[i] = 0;
+		} else
+			chip->cyc_ctr.count[i] = data[0] | data[1] << 8;
+
+		length += scnprintf(buf + length,
+				    PAGE_SIZE - length, "%d",
+				    chip->cyc_ctr.count[i]);
+
+		if (i == BUCKET_COUNT-1)
+			length += scnprintf(buf + length,
+					    PAGE_SIZE - length, "\n");
+		else
+			length += scnprintf(buf + length,
+					    PAGE_SIZE - length, " ");
+	}
+	mutex_unlock(&chip->cyc_ctr.lock);
+
+	return length;
+}
+
+static ssize_t fg_set_cycle_counts_bins(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+	int rc = 0, strval[BUCKET_COUNT], bucket;
+	u16 cyc_count;
+	u8 data[2];
+
+	if (sscanf(buf, "%d %d %d %d %d %d %d %d",
+		   &strval[0], &strval[1], &strval[2], &strval[3],
+		   &strval[4], &strval[5], &strval[6], &strval[7])
+	    != BUCKET_COUNT)
+		return -EINVAL;
+
+	mutex_lock(&chip->cyc_ctr.lock);
+	for (bucket = 0; bucket < BUCKET_COUNT; bucket++) {
+		if (strval[bucket] > chip->cyc_ctr.count[bucket]) {
+			cyc_count = strval[bucket];
+			data[0] = cyc_count & 0xFF;
+			data[1] = cyc_count >> 8;
+
+			rc = fg_sram_write(chip,
+					CYCLE_COUNT_WORD + (bucket / 2),
+					CYCLE_COUNT_OFFSET + (bucket % 2) * 2,
+					data, 2, FG_IMA_DEFAULT);
+			if (rc < 0) {
+				pr_err("failed to write BATT_CYCLE[%d] rc=%d\n",
+				       bucket, rc);
+				mutex_unlock(&chip->cyc_ctr.lock);
+				return rc;
+			}
+			chip->cyc_ctr.count[bucket] = cyc_count;
+		}
+	}
+	mutex_unlock(&chip->cyc_ctr.lock);
+
+	return count;
+}
+
+static DEVICE_ATTR(cycle_counts_bins, 0660,
+		   fg_get_cycle_counts_bins, fg_set_cycle_counts_bins);
+
 static void restore_cycle_counter(struct fg_chip *chip)
 {
 	int rc = 0, i;
@@ -2608,7 +2690,7 @@ static void clear_cycle_counter(struct fg_chip *chip)
 	}
 	rc = fg_sram_write(chip, CYCLE_COUNT_WORD, CYCLE_COUNT_OFFSET,
 			(u8 *)&chip->cyc_ctr.count,
-			sizeof(chip->cyc_ctr.count) / (sizeof(u8 *)),
+			sizeof(chip->cyc_ctr.count) / sizeof(u8 *),
 			FG_IMA_DEFAULT);
 	if (rc < 0)
 		pr_err("failed to clear cycle counter rc=%d\n", rc);
@@ -2698,12 +2780,25 @@ static int fg_get_cycle_count(struct fg_chip *chip)
 	if (!chip->cyc_ctr.en)
 		return 0;
 
+#ifdef CONFIG_QPNP_FG_GEN3_LEGACY_CYCLE_COUNT
 	if ((chip->cyc_ctr.id <= 0) || (chip->cyc_ctr.id > BUCKET_COUNT))
 		return -EINVAL;
 
 	mutex_lock(&chip->cyc_ctr.lock);
 	count = chip->cyc_ctr.count[chip->cyc_ctr.id - 1];
 	mutex_unlock(&chip->cyc_ctr.lock);
+#else
+	mutex_lock(&chip->cyc_ctr.lock);
+	{
+		int i;
+
+		count = 0;
+		for (i = 0 ; i < BUCKET_COUNT; i++)
+			count += chip->cyc_ctr.count[i];
+		count = DIV_ROUND_CLOSEST(count, 8);
+	}
+	mutex_unlock(&chip->cyc_ctr.lock);
+#endif
 	return count;
 }
 
@@ -3733,7 +3828,35 @@ static int fg_psy_get_property(struct power_supply *psy,
 				       union power_supply_propval *pval)
 {
 	struct fg_chip *chip = power_supply_get_drvdata(psy);
+	struct fg_saved_data *sd = chip->saved_data + psp;
+	union power_supply_propval typec_sts = { .intval = -1 };
 	int rc = 0;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+	case POWER_SUPPLY_PROP_RESISTANCE_ID:
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
+	case POWER_SUPPLY_PROP_CYCLE_COUNT_ID:
+	case POWER_SUPPLY_PROP_CHARGE_NOW:
+	case POWER_SUPPLY_PROP_CHARGE_FULL:
+	case POWER_SUPPLY_PROP_SOC_REPORTING_READY:
+		/* These props don't require a fg query; don't ratelimit them */
+		break;
+	default:
+		if (!sd->last_req_expires)
+			break;
+
+		if (usb_psy_initialized(chip))
+			power_supply_get_property(chip->usb_psy,
+				POWER_SUPPLY_PROP_TYPEC_MODE, &typec_sts);
+
+		if (typec_sts.intval == POWER_SUPPLY_TYPEC_NONE &&
+			time_before(jiffies, sd->last_req_expires)) {
+			*pval = sd->val;
+			return 0;
+		}
+		break;
+	}
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CAPACITY:
@@ -3803,9 +3926,11 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		pval->intval = fg_get_cycle_count(chip);
 		break;
+#ifdef CONFIG_QPNP_FG_GEN3_LEGACY_CYCLE_COUNT
 	case POWER_SUPPLY_PROP_CYCLE_COUNT_ID:
 		pval->intval = chip->cyc_ctr.id;
 		break;
+#endif
 	case POWER_SUPPLY_PROP_CHARGE_NOW_RAW:
 		rc = fg_get_charge_raw(chip, &pval->intval);
 		break;
@@ -3859,6 +3984,9 @@ static int fg_psy_get_property(struct power_supply *psy,
 	if (rc < 0)
 		return -ENODATA;
 
+	sd->val = *pval;
+	sd->last_req_expires = jiffies + msecs_to_jiffies(FG_RATE_LIM_MS);
+
 	return 0;
 }
 
@@ -3867,9 +3995,10 @@ static int fg_psy_set_property(struct power_supply *psy,
 				  const union power_supply_propval *pval)
 {
 	struct fg_chip *chip = power_supply_get_drvdata(psy);
-	int rc = 0;
+	int rc = -EINVAL;
 
 	switch (psp) {
+#ifdef CONFIG_QPNP_FG_GEN3_LEGACY_CYCLE_COUNT
 	case POWER_SUPPLY_PROP_CYCLE_COUNT_ID:
 		if ((pval->intval > 0) && (pval->intval <= BUCKET_COUNT)) {
 			chip->cyc_ctr.id = pval->intval;
@@ -3879,6 +4008,7 @@ static int fg_psy_set_property(struct power_supply *psy,
 			return -EINVAL;
 		}
 		break;
+#endif
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 		rc = fg_set_constant_chg_voltage(chip, pval->intval);
 		break;
@@ -3961,7 +4091,9 @@ static int fg_property_is_writeable(struct power_supply *psy,
 						enum power_supply_property psp)
 {
 	switch (psp) {
+#ifdef CONFIG_QPNP_FG_GEN3_LEGACY_CYCLE_COUNT
 	case POWER_SUPPLY_PROP_CYCLE_COUNT_ID:
+#endif
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 	case POWER_SUPPLY_PROP_CC_STEP:
 	case POWER_SUPPLY_PROP_CC_STEP_SEL:
@@ -4034,7 +4166,9 @@ static enum power_supply_property fg_psy_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
+#ifdef CONFIG_QPNP_FG_GEN3_LEGACY_CYCLE_COUNT
 	POWER_SUPPLY_PROP_CYCLE_COUNT_ID,
+#endif
 	POWER_SUPPLY_PROP_CHARGE_NOW_RAW,
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
@@ -5341,6 +5475,12 @@ static int fg_gen3_probe(struct platform_device *pdev)
 		dev_err(chip->dev, "Error in reading DT parameters, rc:%d\n",
 			rc);
 		goto exit;
+	}
+
+	rc = device_create_file(chip->dev, &dev_attr_cycle_counts_bins);
+	if (rc != 0) {
+		dev_err(chip->dev,
+			"Failed to create cycle_counts_bins files: %d\n", rc);
 	}
 
 	mutex_init(&chip->bus_lock);

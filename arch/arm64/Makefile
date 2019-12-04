@@ -15,8 +15,9 @@ CPPFLAGS_vmlinux.lds = -DTEXT_OFFSET=$(TEXT_OFFSET)
 OBJCOPYFLAGS	:=-O binary -R .note -R .note.gnu.build-id -R .comment -S
 GZFLAGS		:=-9
 
-ifneq ($(CONFIG_RELOCATABLE),)
-LDFLAGS_vmlinux		+= -pie -Bsymbolic
+ifeq ($(CONFIG_RELOCATABLE), y)
+LDFLAGS_vmlinux		+= -pie -Bsymbolic \
+			$(call ld-option, --no-apply-dynamic-relocs)
 endif
 
 KBUILD_DEFCONFIG := defconfig
@@ -60,9 +61,7 @@ ifeq ($(CONFIG_COMPAT_VDSO), y)
 endif
 
 ifeq ($(cc-name),clang)
-# This is a workaround for https://bugs.llvm.org/show_bug.cgi?id=30792.
-# TODO: revert when this is fixed in LLVM.
-KBUILD_CFLAGS	+= -mno-implicit-float
+KBUILD_CFLAGS	+= $(call clang-ifversion, -ge, 0600, -mgeneral-regs-only, -mno-implicit-float)
 else
 KBUILD_CFLAGS	+= -mgeneral-regs-only
 endif

@@ -1047,6 +1047,7 @@ static inline void clear_page_pfmemalloc(struct page *page)
 #define VM_FAULT_HWPOISON 0x0010	/* Hit poisoned small page */
 #define VM_FAULT_HWPOISON_LARGE 0x0020  /* Hit poisoned large page. Index encoded in upper bits */
 #define VM_FAULT_SIGSEGV 0x0040
+#define VM_FAULT_SWAP 0x0080
 
 #define VM_FAULT_NOPAGE	0x0100	/* ->fault installed the pte, not return page */
 #define VM_FAULT_LOCKED	0x0200	/* ->fault locked the returned page */
@@ -1114,27 +1115,6 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size, struct zap_details *);
 void unmap_vmas(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
 		unsigned long start, unsigned long end);
-
-/*
- * This has to be called after a get_task_mm()/mmget_not_zero()
- * followed by taking the mmap_sem for writing before modifying the
- * vmas or anything the coredump pretends not to change from under it.
- *
- * NOTE: find_extend_vma() called from GUP context is the only place
- * that can modify the "mm" (notably the vm_start/end) under mmap_sem
- * for reading and outside the context of the process, so it is also
- * the only case that holds the mmap_sem for reading that must call
- * this function. Generally if the mmap_sem is hold for reading
- * there's no need of this check after get_task_mm()/mmget_not_zero().
- *
- * This function can be obsoleted and the check can be removed, after
- * the coredump code will hold the mmap_sem for writing before
- * invoking the ->core_dump methods.
- */
-static inline bool mmget_still_valid(struct mm_struct *mm)
-{
-	return likely(!mm->core_state);
-}
 
 /**
  * mm_walk - callbacks for walk_page_range
@@ -1359,19 +1339,27 @@ static inline unsigned long get_mm_counter(struct mm_struct *mm, int member)
 	return (unsigned long)val;
 }
 
+void mm_trace_rss_stat(int member, long count, long value);
+
 static inline void add_mm_counter(struct mm_struct *mm, int member, long value)
 {
-	atomic_long_add(value, &mm->rss_stat.count[member]);
+	long count = atomic_long_add_return(value, &mm->rss_stat.count[member]);
+
+	mm_trace_rss_stat(member, count, value);
 }
 
 static inline void inc_mm_counter(struct mm_struct *mm, int member)
 {
-	atomic_long_inc(&mm->rss_stat.count[member]);
+	long count = atomic_long_inc_return(&mm->rss_stat.count[member]);
+
+	mm_trace_rss_stat(member, count, 1);
 }
 
 static inline void dec_mm_counter(struct mm_struct *mm, int member)
 {
-	atomic_long_dec(&mm->rss_stat.count[member]);
+	long count = atomic_long_dec_return(&mm->rss_stat.count[member]);
+
+	mm_trace_rss_stat(member, count, -1);
 }
 
 static inline unsigned long get_mm_rss(struct mm_struct *mm)
@@ -2377,20 +2365,6 @@ static inline bool page_is_guard(struct page *page) { return false; }
 void __init setup_nr_node_ids(void);
 #else
 static inline void setup_nr_node_ids(void) {}
-#endif
-
-#ifdef CONFIG_PROCESS_RECLAIM
-struct reclaim_param {
-	struct vm_area_struct *vma;
-	/* Number of pages scanned */
-	int nr_scanned;
-	/* max pages to reclaim */
-	int nr_to_reclaim;
-	/* pages reclaimed */
-	int nr_reclaimed;
-};
-extern struct reclaim_param reclaim_task_anon(struct task_struct *task,
-		int nr_to_reclaim);
 #endif
 
 #endif /* __KERNEL__ */

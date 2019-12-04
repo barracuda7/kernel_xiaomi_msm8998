@@ -326,16 +326,6 @@ config MSM_IPC_ROUTER_GLINK_XPRT
 	  this layer registers a transport with IPC Router and enable
 	  message exchange.
 
-config MSM_IPC_ROUTER_SDIO_XPRT
-	depends on QTI_SDIO_CLIENT
-	depends on IPC_ROUTER
-	bool "MSM SDIO XPRT Layer"
-	help
-	  SDIO Transport Layer that enables off-chip communication of
-	  IPC Router. When the SDIO endpoint becomes available, this layer
-	  registers the transport with IPC Router and enable message
-	  exchange.
-
 config MSM_SYSTEM_HEALTH_MONITOR
 	bool "System Health Monitor"
 	depends on MSM_QMI_INTERFACE && MSM_SUBSYSTEM_RESTART
@@ -754,6 +744,13 @@ config MSM_PERFORMANCE_HOTPLUG_ON
 	 functionality of hot plugging cores through msm_performance if there is
 	 no default core-control driver available.
 
+config MSM_PERFORMANCE_CPUFREQ_LIMITS_VOTING_ONLY
+	bool "Restrict msm_performance driver to cpufreq limits voting only"
+	depends on MSM_PERFORMANCE
+	help
+	 Setting this flag to true will restrict msm_performance driver's
+	 capabilities to setting min/max CPU frequencies only.
+
 endif # ARCH_QCOM
 
 config MSM_SUBSYSTEM_RESTART
@@ -1005,11 +1002,5 @@ config EXT_ANC
 	help
 	 This option enables support for anti-noise cnacellation
 	 on Sensor DSP.
-
-config MFSE_QMI
-	bool "QMI client for MFSE"
-	depends on MSM_QMI_INTERFACE
-	help
-	 This option enables the QMI client driver for MFSE service.
 
 source "drivers/soc/qcom/memshare/Kconfig"

@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,20 +24,16 @@
 #include "qmi.h"
 
 #define MAX_NO_OF_MAC_ADDR		4
-#define CNSS_RDDM_TIMEOUT_MS		20000
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
 #define CNSS_EVENT_SYNC_UNINTERRUPTIBLE (CNSS_EVENT_SYNC | \
 				CNSS_EVENT_UNINTERRUPTIBLE)
-#define QCN7605_CALDB_SIZE 614400
-#define HOST_WAKE_GPIO_IN 144
 
 enum cnss_dev_bus_type {
 	CNSS_BUS_NONE = -1,
 	CNSS_BUS_PCI,
 	CNSS_BUS_USB,
-	CNSS_BUS_SDIO,
 };
 
 struct cnss_vreg_info {
@@ -146,7 +142,6 @@ enum cnss_driver_state {
 	CNSS_FW_BOOT_RECOVERY,
 	CNSS_DEV_ERR_NOTIFY,
 	CNSS_DRIVER_DEBUG,
-	CNSS_DEV_REMOVED,
 };
 
 struct cnss_recovery_data {
@@ -177,11 +172,6 @@ enum cnss_debug_quirks {
 	SKIP_DEVICE_BOOT,
 	USE_CORE_ONLY_FW,
 	SKIP_RECOVERY,
-};
-
-struct cnss_cal_data {
-	u32 index;
-	u32 total_size;
 };
 
 struct cnss_plat_data {
@@ -226,9 +216,7 @@ struct cnss_plat_data {
 	u32 diag_reg_read_mem_type;
 	u32 diag_reg_read_len;
 	u8 *diag_reg_read_buf;
-	void *caldb_mem;
 	bool cal_done;
-	struct completion rddm_complete;
 };
 
 struct cnss_plat_data *cnss_get_plat_priv(struct platform_device *plat_dev);
@@ -261,6 +249,4 @@ void cnss_set_pin_connect_status(struct cnss_plat_data *plat_priv);
 u32 cnss_get_wake_msi(struct cnss_plat_data *plat_priv);
 bool *cnss_get_qmi_bypass(void);
 bool is_qcn7605_device(u16 device_id);
-void cnss_set_wlan_chip_to_host_wakeup(unsigned int wakeup_gpio_num);
-int cnss_enable_wow_wake(const char *val, const struct kernel_param *kp);
 #endif /* _CNSS_MAIN_H */

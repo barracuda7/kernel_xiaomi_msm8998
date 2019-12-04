@@ -486,7 +486,7 @@ int mmc_recovery_fallback_lower_speed(struct mmc_host *host)
 		mmc_host_clear_sdr104(host);
 		err = mmc_hw_reset(host);
 		host->card->sdr104_blocked = true;
-	} else if (mmc_card_sd(host->card)) {
+	} else {
 		/* If sdr104_wa is not present, just return status */
 		err = host->bus_ops->alive(host);
 	}
@@ -2360,7 +2360,7 @@ void mmc_set_ios(struct mmc_host *host)
 		"width %u timing %u\n",
 		 mmc_hostname(host), ios->clock, ios->bus_mode,
 		 ios->power_mode, ios->chip_select, ios->vdd,
-		 1 << ios->bus_width, ios->timing);
+		 ios->bus_width, ios->timing);
 
 	if (ios->clock > 0)
 		mmc_set_ungated(host);
@@ -2641,12 +2641,8 @@ int mmc_of_parse_voltage(struct device_node *np, u32 *mask)
 
 	voltage_ranges = of_get_property(np, "voltage-ranges", &num_ranges);
 	num_ranges = num_ranges / sizeof(*voltage_ranges) / 2;
-	if (!voltage_ranges) {
-		pr_debug("%s: voltage-ranges unspecified\n", np->full_name);
-		return -EINVAL;
-	}
-	if (!num_ranges) {
-		pr_err("%s: voltage-ranges empty\n", np->full_name);
+	if (!voltage_ranges || !num_ranges) {
+		pr_info("%s: voltage-ranges unspecified\n", np->full_name);
 		return -EINVAL;
 	}
 

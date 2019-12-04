@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1492,7 +1492,7 @@ void validate_output_buffers(struct msm_vidc_inst *inst)
 	}
 	mutex_lock(&inst->outputbufs.lock);
 	list_for_each_entry(binfo, &inst->outputbufs.list, list) {
-		if (binfo->buffer_ownership != DRIVER) {
+		if (binfo && binfo->buffer_ownership != DRIVER) {
 			dprintk(VIDC_DBG,
 				"This buffer is with FW %pa\n",
 				&binfo->handle->device_addr);
@@ -3210,8 +3210,7 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 			if (!handle) {
 				dprintk(VIDC_ERR,
 					"Failed to allocate output memory\n");
-				rc = -ENOMEM;
-				goto err_no_mem;
+				return -ENOMEM;
 			}
 			rc = msm_comm_smem_cache_operations(inst,
 					handle, SMEM_CACHE_CLEAN, -1);
@@ -3263,10 +3262,9 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 	}
 	return rc;
 fail_set_buffers:
-	msm_comm_smem_free(inst, handle);
-err_no_mem:
 	kfree(binfo);
 fail_kzalloc:
+	msm_comm_smem_free(inst, handle);
 	return rc;
 }
 
@@ -3858,17 +3856,20 @@ int msm_comm_qbuf(struct msm_vidc_inst *inst, struct vb2_buffer *vb)
 	 * Don't queue if:
 	 * 1) Hardware isn't ready (that's simple)
 	 */
-	defer = defer ?: inst->state != MSM_VIDC_START_DONE;
+	if (!defer)
+		defer = inst->state != MSM_VIDC_START_DONE;
 
 	/*
 	 * 2) The client explicitly tells us not to because it wants this
 	 * buffer to be batched with future frames.  The batch size (on both
 	 * capabilities) is completely determined by the client.
 	 */
-	defer = defer ?: vbuf && vbuf->flags & V4L2_MSM_BUF_FLAG_DEFER;
+	if (!defer)
+		defer = vbuf && vbuf->flags & V4L2_MSM_BUF_FLAG_DEFER;
 
 	/* 3) If we're in batch mode, we must have full batches of both types */
-	defer = defer ?: batch_mode && (!output_count || !capture_count);
+	if (!defer)
+		defer = batch_mode && (!output_count || !capture_count);
 
 	if (defer) {
 		dprintk(VIDC_DBG, "Deferring queue of %pK\n", vb);

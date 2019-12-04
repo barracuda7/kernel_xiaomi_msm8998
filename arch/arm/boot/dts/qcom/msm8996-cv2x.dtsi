@@ -182,6 +182,7 @@
 		spi-max-frequency = <9600000>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <78 2>;
+		qcom,reset-gpio = <&tlmm 71 GPIO_ACTIVE_LOW>;
 		qcom,clk-freq-mhz = <20000000>;
 		qcom,max-can-channels = <2>;
 		qcom,bits-per-word = <8>;
@@ -189,6 +190,9 @@
 		qcom,can-fw-cmd-timeout-req;
 		qcom,can-fw-cmd-timeout-ms = <400>;
 		qcom,rem-all-buffering-timeout-ms = <2000>;
+		pinctrl-names = "active", "sleep";
+		pinctrl-0 = <&can_rst_on>;
+		pinctrl-1 = <&can_rst_off>;
 	};
 };
 
@@ -398,7 +402,7 @@
 		qcom,vin-sel = <2>;		/* S4 1.8V */
 		qcom,src-sel = <0>;		/* Constant */
 		qcom,master-en = <1>;		/* Enable GPIO */
-		qcom,invert = <1>;		/* Output high */
+		qcom,invert = <0>;		/* Output low */
 		status = "okay";
 	};
 };
@@ -578,16 +582,5 @@
 		qcom,hotplug-temp = <115>;
 		qcom,hotplug-temp-hysteresis = <25>;
 		qcom,therm-reset-temp = <119>;
-	};
-};
-
-&tlmm {
-	pinctrl-names = "default";
-	pinctrl-0 = <&can_rst_on>;
-};
-
-&can_rst_on {
-	config {
-		output-high;
 	};
 };

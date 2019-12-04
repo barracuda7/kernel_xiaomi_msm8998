@@ -1159,7 +1159,6 @@ config FAIR_GROUP_SCHED
 config CFS_BANDWIDTH
 	bool "CPU bandwidth provisioning for FAIR_GROUP_SCHED"
 	depends on FAIR_GROUP_SCHED
-	depends on !SCHED_WALT
 	default n
 	help
 	  This option allows users to define CPU bandwidth rates (limits) for
@@ -1353,6 +1352,15 @@ config SCHED_TUNE
 
 	  Since this support exposes a single system-wide knob, the specified
 	  boost value is applied to all (CFS) tasks in the system.
+
+	  If unsure, say N.
+
+config DYNAMIC_STUNE_BOOST
+	bool "Dynamic SchedTune boosting support"
+	depends on SCHED_TUNE && CGROUP_SCHEDTUNE && !SCHED_HMP && CPU_INPUT_BOOST
+	help
+	  This option extends the SchedTune framework and provides APIs to
+	  activate and reset SchedTune boosting from anywhere in the kernel.
 
 	  If unsure, say N.
 

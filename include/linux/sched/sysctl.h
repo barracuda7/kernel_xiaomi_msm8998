@@ -41,6 +41,12 @@ extern unsigned int sysctl_sched_wakeup_granularity;
 extern unsigned int sysctl_sched_child_runs_first;
 extern unsigned int sysctl_sched_sync_hint_enable;
 extern unsigned int sysctl_sched_cstate_aware;
+#ifdef CONFIG_SCHED_WALT
+extern unsigned int sysctl_sched_use_walt_cpu_util;
+extern unsigned int sysctl_sched_use_walt_task_util;
+extern unsigned int sysctl_sched_walt_init_task_load_pct;
+extern unsigned int sysctl_sched_walt_cpu_high_irqload;
+#endif
 
 #ifdef CONFIG_SCHED_HMP
 
@@ -172,5 +178,10 @@ extern int sched_rt_handler(struct ctl_table *table, int write,
 extern int sysctl_numa_balancing(struct ctl_table *table, int write,
 				 void __user *buffer, size_t *lenp,
 				 loff_t *ppos);
+
+extern unsigned int sysctl_sched_boost;
+
+extern int sched_boost_handler(struct ctl_table *table, int write,
+			       void __user *buffer, size_t *lenp, loff_t *ppos);
 
 #endif /* _SCHED_SYSCTL_H */

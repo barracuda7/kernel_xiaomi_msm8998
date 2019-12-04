@@ -24,6 +24,7 @@ obj-$(CONFIG_MSM_RPM_SMD)	+=	rpm-smd-debug.o
 endif
 obj-$(CONFIG_MSM_IPC_ROUTER_SMD_XPRT)	+=	ipc_router_smd_xprt.o
 obj-$(CONFIG_MSM_IPC_ROUTER_HSIC_XPRT)	+=	ipc_router_hsic_xprt.o
+obj-$(CONFIG_MSM_IPC_ROUTER_SDIO_XPRT)	+=	ipc_router_sdio_xprt.o
 obj-$(CONFIG_MSM_IPC_ROUTER_MHI_XPRT)	+=	ipc_router_mhi_xprt.o
 obj-$(CONFIG_MSM_IPC_ROUTER_GLINK_XPRT)	+=	ipc_router_glink_xprt.o
 obj-$(CONFIG_MSM_SPCOM) += spcom.o
@@ -111,8 +112,4 @@ obj-$(CONFIG_QCOM_CX_IPEAK) += cx_ipeak.o
 obj-$(CONFIG_MSM_CACHE_M4M_ERP64) += cache_m4m_erp64.o
 obj-$(CONFIG_MSM_HAB) += hab/
 obj-$(CONFIG_QCOM_QDSS_BRIDGE) += qdss_bridge.o
-
-# TODO: remove me b/62058353
-subdir-ccflags-y += \
-	-Wno-ignored-attributes \
-	-Wno-gcc-compat
+obj-$(CONFIG_MFSE_QMI) += mfse_qmi_v01.o mfse_qmi.o

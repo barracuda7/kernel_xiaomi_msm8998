@@ -30,6 +30,10 @@
 #include <linux/fb.h>
 #endif
 
+#ifdef CONFIG_FORCE_FAST_CHARGE
+#include <linux/fastchg.h>
+#endif
+
 #define smblib_err(chg, fmt, ...)		\
 	pr_err("%s: %s: " fmt, chg->name,	\
 		__func__, ##__VA_ARGS__)	\
@@ -821,6 +825,13 @@ static int set_sdp_current(struct smb_charger *chg, int icl_ua)
 	int rc;
 	u8 icl_options;
 	const struct apsd_result *apsd_result = smblib_get_apsd_result(chg);
+
+#ifdef CONFIG_FORCE_FAST_CHARGE
+    if (force_fast_charge > 0 && icl_ua == USBIN_500MA)
+    {
+	icl_ua = USBIN_900MA;
+    }
+#endif
 
 	/* power source is SDP */
 	switch (icl_ua) {
@@ -1857,21 +1868,6 @@ int smblib_get_prop_from_bms(struct smb_charger *chg,
 	return rc;
 }
 
-#ifndef CONFIG_QPNP_FG_GEN3_LEGACY_CYCLE_COUNT
-int smblib_get_cycle_count(struct smb_charger *chg,
-			   union power_supply_propval *val)
-{
-	int rc;
-
-	if (!chg->bms_psy)
-		return -EINVAL;
-
-	rc = power_supply_get_property(chg->bms_psy,
-				       POWER_SUPPLY_PROP_CYCLE_COUNT, val);
-	return rc;
-}
-#endif
-
 /***********************
  * BATTERY PSY SETTERS *
  ***********************/
@@ -1911,7 +1907,7 @@ int smblib_set_prop_batt_capacity(struct smb_charger *chg,
 }
 
 #ifdef CONFIG_MACH_XIAOMI_MSM8998
-#define SCREEN_ON_ICL		1600000
+#define SCREEN_ON_ICL		3200000
 #define SCREEN_ON_CHECK_MS	90000
 #define SCREEN_OFF_CHECK_MS	5000
 static void smblib_fb_state_work(struct work_struct *work)
@@ -2029,7 +2025,7 @@ int smblib_set_prop_system_temp_level(struct smb_charger *chg,
 	if (chg->system_temp_level == 0)
 		return vote(chg->usb_icl_votable, THERMAL_DAEMON_VOTER, false, 0);
 
-	switch (chg->usb_psy_desc.type) {
+	switch (chg->real_charger_type) {
 	case POWER_SUPPLY_TYPE_USB_HVDCP:
 		thermal_mitigation = chg->thermal_mitigation_qc2;
 		break;

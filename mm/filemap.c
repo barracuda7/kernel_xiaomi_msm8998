@@ -342,7 +342,8 @@ int __filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
 		.range_end = end,
 	};
 
-	if (!mapping_cap_writeback_dirty(mapping))
+	if (!mapping_cap_writeback_dirty(mapping) ||
+	    !mapping_tagged(mapping, PAGECACHE_TAG_DIRTY))
 		return 0;
 
 	wbc_attach_fdatawrite_inode(&wbc, mapping->host);
@@ -1576,9 +1577,7 @@ static ssize_t do_generic_file_read(struct file *filp, loff_t *ppos,
 		pgoff_t end_index;
 		loff_t isize;
 		unsigned long nr, ret;
-		ktime_t event_ts;
 
-		event_ts.tv64 = 0;
 		cond_resched();
 find_page:
 		if (fatal_signal_pending(current)) {
@@ -1588,7 +1587,6 @@ find_page:
 
 		page = find_get_page(mapping, index);
 		if (!page) {
-			mm_event_start(&event_ts);
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
@@ -1625,8 +1623,6 @@ find_page:
 			unlock_page(page);
 		}
 page_ok:
-		if (event_ts.tv64 != 0)
-			mm_event_end(MM_READ_IO, event_ts);
 		/*
 		 * i_size must be checked after we know the page is Uptodate.
 		 *

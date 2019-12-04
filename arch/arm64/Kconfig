@@ -29,6 +29,7 @@ config ARM64
 	select CPU_PM if (SUSPEND || CPU_IDLE)
 	select DCACHE_WORD_ACCESS
 	select EDAC_SUPPORT
+	select FRAME_POINTER
 	select GENERIC_ALLOCATOR
 	select EDAC_SUPPORT
 	select GENERIC_CLOCKEVENTS
@@ -99,13 +100,11 @@ config ARM64
 	select PERF_USE_VMALLOC
 	select POWER_RESET
 	select POWER_SUPPLY
-	select RTC_LIB
 	select SPARSE_IRQ
 	select SYSCTL_EXCEPTION_TRACE
 	select HAVE_CONTEXT_TRACKING
 	select HAVE_ARM_SMCCC
 	select THREAD_INFO_IN_TASK
-	select HAVE_ARM_SMCCC
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -1229,6 +1228,10 @@ config KUSER_HELPERS
 config SYSVIPC_COMPAT
 	def_bool y
 	depends on COMPAT && SYSVIPC
+
+config KEYS_COMPAT
+	def_bool y
+	depends on COMPAT && KEYS
 
 config COMPAT_VDSO
 	bool "32-bit vDSO"

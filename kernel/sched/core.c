@@ -97,7 +97,6 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
-#include "walt.h"
 
 static atomic_t __su_instances;
 
@@ -1246,27 +1245,10 @@ void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_ma
 	p->nr_cpus_allowed = cpumask_weight(new_mask);
 }
 
-static const struct cpumask *get_adjusted_cpumask(const struct task_struct *p,
-	const struct cpumask *req_mask)
-{
-	/* Force all performance-critical kthreads onto the big cluster */
-	if (p->flags & PF_PERF_CRITICAL)
-		return cpu_perf_mask;
-
-	/* Force all trivial, unbound kthreads onto the little cluster */
-	if (p->flags & PF_KTHREAD && p->pid != 1 &&
-		cpumask_equal(req_mask, cpu_all_mask))
-		return cpu_lp_mask;
-
-	return req_mask;
-}
-
 void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
 {
 	struct rq *rq = task_rq(p);
 	bool queued, running;
-
-	new_mask = get_adjusted_cpumask(p, new_mask);
 
 	lockdep_assert_held(&p->pi_lock);
 
@@ -1309,8 +1291,6 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 	unsigned int dest_cpu;
 	int ret = 0;
 	cpumask_t allowed_mask;
-
-	new_mask = get_adjusted_cpumask(p, new_mask);
 
 	rq = task_rq_lock(p, &flags);
 
@@ -1416,7 +1396,6 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 		p->se.nr_migrations++;
 		perf_event_task_migrate(p);
 
-		walt_fixup_busy_time(p, new_cpu);
 		fixup_busy_time(p, new_cpu);
 	}
 
@@ -2182,12 +2161,10 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags,
 
 	raw_spin_lock(&rq->lock);
 	old_load = task_load(p);
-	wallclock = walt_ktime_clock();
-	walt_update_task_ravg(rq->curr, rq, TASK_UPDATE, wallclock, 0);
-	walt_update_task_ravg(p, rq, TASK_WAKE, wallclock, 0);
 	wallclock = sched_ktime_clock();
 	update_task_ravg(rq->curr, rq, TASK_UPDATE, wallclock, 0);
 	update_task_ravg(p, rq, TASK_WAKE, wallclock, 0);
+	cpufreq_update_util(rq, 0);
 	raw_spin_unlock(&rq->lock);
 
 	rcu_read_lock();
@@ -2277,15 +2254,11 @@ static void try_to_wake_up_local(struct task_struct *p)
 	trace_sched_waking(p);
 
 	if (!task_on_rq_queued(p)) {
-		u64 wallclock = walt_ktime_clock();
-
-		walt_update_task_ravg(rq->curr, rq, TASK_UPDATE, wallclock, 0);
-		walt_update_task_ravg(p, rq, TASK_WAKE, wallclock, 0);
-
-		wallclock = sched_ktime_clock();
+		u64 wallclock = sched_ktime_clock();
 
 		update_task_ravg(rq->curr, rq, TASK_UPDATE, wallclock, 0);
 		update_task_ravg(p, rq, TASK_WAKE, wallclock, 0);
+		cpufreq_update_util(rq, 0);
 		ttwu_activate(rq, p, ENQUEUE_WAKEUP);
 		note_task_waking(p, wallclock);
 	}
@@ -2418,7 +2391,6 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 #endif
 
 	INIT_LIST_HEAD(&p->se.group_node);
-	walt_init_new_task_load(p);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	p->se.cfs_rq			= NULL;
@@ -2706,8 +2678,6 @@ void wake_up_new_task(struct task_struct *p)
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	p->state = TASK_RUNNING;
 
-	walt_init_new_task_load(p);
-
 	/* Initialize new task's runnable average */
 	init_entity_runnable_average(&p->se);
 #ifdef CONFIG_SMP
@@ -2725,8 +2695,6 @@ void wake_up_new_task(struct task_struct *p)
 	mark_task_starting(p);
 	update_rq_clock(rq);
 	post_init_entity_util_avg(&p->se);
-
-	walt_mark_task_starting(p);
 	activate_task(rq, p, ENQUEUE_WAKEUP_NEW);
 	p->on_rq = TASK_ON_RQ_QUEUED;
 	trace_sched_wakeup_new(p);
@@ -3255,15 +3223,15 @@ void scheduler_tick(void)
 
 	raw_spin_lock(&rq->lock);
 	old_load = task_load(curr);
-	walt_set_window_start(rq);
 	set_window_start(rq);
 	update_rq_clock(rq);
 	curr->sched_class->task_tick(rq, curr, 0);
 	update_cpu_load_active(rq);
 	calc_global_load_tick(rq);
 	wallclock = sched_ktime_clock();
-	walt_update_task_ravg(rq->curr, rq, TASK_UPDATE, walt_ktime_clock(), 0);
 	update_task_ravg(rq->curr, rq, TASK_UPDATE, wallclock, 0);
+
+	cpufreq_update_util(rq, 0);
 	early_notif = early_detection_notify(rq, wallclock);
 	raw_spin_unlock(&rq->lock);
 
@@ -3622,9 +3590,6 @@ static void __sched notrace __schedule(bool preempt)
 		update_rq_clock(rq);
 
 	next = pick_next_task(rq, prev);
-	wallclock = walt_ktime_clock();
-	walt_update_task_ravg(prev, rq, PUT_PREV_TASK, wallclock, 0);
-	walt_update_task_ravg(next, rq, PICK_NEXT_TASK, wallclock, 0);
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 	rq->clock_skip_update = 0;
@@ -3635,6 +3600,7 @@ static void __sched notrace __schedule(bool preempt)
 	if (likely(prev != next)) {
 		update_task_ravg(prev, rq, PUT_PREV_TASK, wallclock, 0);
 		update_task_ravg(next, rq, PICK_NEXT_TASK, wallclock, 0);
+		cpufreq_update_util(rq, 0);
 		if (!is_idle_task(prev) && !prev->on_rq)
 			update_avg_burst(prev);
 
@@ -3653,6 +3619,7 @@ static void __sched notrace __schedule(bool preempt)
 		cpu = cpu_of(rq);
 	} else {
 		update_task_ravg(prev, rq, TASK_UPDATE, wallclock, 0);
+		cpufreq_update_util(rq, 0);
 		lockdep_unpin_lock(&rq->lock);
 		raw_spin_unlock_irq(&rq->lock);
 	}
@@ -5458,9 +5425,8 @@ void show_state_filter(unsigned long state_filter)
 
 	touch_all_softlockup_watchdogs();
 
-#ifdef CONFIG_SYSRQ_SCHED_DEBUG
-	if (!state_filter)
-		sysrq_sched_debug_show();
+#ifdef CONFIG_SCHED_DEBUG
+	sysrq_sched_debug_show();
 #endif
 	rcu_read_unlock();
 	/*
@@ -6381,7 +6347,6 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 
 	case CPU_UP_PREPARE:
 		raw_spin_lock_irqsave(&rq->lock, flags);
-		walt_set_window_start(rq);
 		set_window_start(rq);
 		raw_spin_unlock_irqrestore(&rq->lock, flags);
 		rq->calc_load_update = calc_load_update;
@@ -6403,7 +6368,6 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		sched_ttwu_pending();
 		/* Update our root-domain */
 		raw_spin_lock_irqsave(&rq->lock, flags);
-		walt_migrate_sync_cpu(cpu);
 
 		if (rq->rd) {
 			BUG_ON(!cpumask_test_cpu(cpu, rq->rd->span));
@@ -6443,6 +6407,10 @@ static void set_cpu_rq_start_time(void)
 	rq->age_stamp = sched_clock_cpu(cpu);
 }
 
+#ifdef CONFIG_SCHED_SMT
+atomic_t sched_smt_present = ATOMIC_INIT(0);
+#endif
+
 static int sched_cpu_active(struct notifier_block *nfb,
 				      unsigned long action, void *hcpu)
 {
@@ -6459,11 +6427,23 @@ static int sched_cpu_active(struct notifier_block *nfb,
 		 * set_cpu_online(). But it might not yet have marked itself
 		 * as active, which is essential from here on.
 		 */
+#ifdef CONFIG_SCHED_SMT
+		/*
+		 * When going up, increment the number of cores with SMT present.
+		 */
+		if (cpumask_weight(cpu_smt_mask(cpu)) == 2)
+			atomic_inc(&sched_smt_present);
+#endif
 		set_cpu_active(cpu, true);
 		stop_machine_unpark(cpu);
 		return NOTIFY_OK;
 
 	case CPU_DOWN_FAILED:
+#ifdef CONFIG_SCHED_SMT
+		/* Same as for CPU_ONLINE */
+		if (cpumask_weight(cpu_smt_mask(cpu)) == 2)
+			atomic_inc(&sched_smt_present);
+#endif
 		set_cpu_active(cpu, true);
 		return NOTIFY_OK;
 
@@ -6478,7 +6458,15 @@ static int sched_cpu_inactive(struct notifier_block *nfb,
 	switch (action & ~CPU_TASKS_FROZEN) {
 	case CPU_DOWN_PREPARE:
 		set_cpu_active((long)hcpu, false);
+#ifdef CONFIG_SCHED_SMT
+		/*
+		 * When going down, decrement the number of cores with SMT present.
+		 */
+		if (cpumask_weight(cpu_smt_mask((long)hcpu)) == 2)
+			atomic_dec(&sched_smt_present);
+#endif
 		return NOTIFY_OK;
+
 	default:
 		return NOTIFY_DONE;
 	}
@@ -8574,11 +8562,6 @@ void __init sched_init(void)
 		}
 #endif
 		rq->max_idle_balance_cost = sysctl_sched_migration_cost;
-#ifdef CONFIG_SCHED_WALT
-		rq->cur_irqload = 0;
-		rq->avg_irqload = 0;
-		rq->irqload_ts = 0;
-#endif
 
 		INIT_LIST_HEAD(&rq->cfs_tasks);
 
@@ -9394,10 +9377,6 @@ static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
 #ifdef CONFIG_RT_GROUP_SCHED
 		if (!sched_rt_can_attach(css_tg(css), task))
 			return -EINVAL;
-#else
-		/* We don't support RT-tasks being in separate groups */
-		if (task->sched_class != &fair_sched_class)
-			return -EINVAL;
 #endif
 		/*
 		 * Serialize against wake_up_new_task() such that if its
@@ -9432,6 +9411,8 @@ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
 static int cpu_shares_write_u64(struct cgroup_subsys_state *css,
 				struct cftype *cftype, u64 shareval)
 {
+	if (shareval > scale_load_down(ULONG_MAX))
+		shareval = MAX_SHARES;
 	return sched_group_set_shares(css_tg(css), scale_load(shareval));
 }
 
@@ -9531,8 +9512,10 @@ int tg_set_cfs_quota(struct task_group *tg, long cfs_quota_us)
 	period = ktime_to_ns(tg->cfs_bandwidth.period);
 	if (cfs_quota_us < 0)
 		quota = RUNTIME_INF;
-	else
+	else if ((u64)cfs_quota_us <= U64_MAX / NSEC_PER_USEC)
 		quota = (u64)cfs_quota_us * NSEC_PER_USEC;
+	else
+		return -EINVAL;
 
 	return tg_set_cfs_bandwidth(tg, period, quota);
 }
@@ -9553,6 +9536,9 @@ long tg_get_cfs_quota(struct task_group *tg)
 int tg_set_cfs_period(struct task_group *tg, long cfs_period_us)
 {
 	u64 quota, period;
+
+	if ((u64)cfs_period_us > U64_MAX / NSEC_PER_USEC)
+		return -EINVAL;
 
 	period = (u64)cfs_period_us * NSEC_PER_USEC;
 	quota = tg->cfs_bandwidth.quota;

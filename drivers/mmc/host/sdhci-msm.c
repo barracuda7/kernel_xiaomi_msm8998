@@ -2,7 +2,7 @@
  * drivers/mmc/host/sdhci-msm.c - Qualcomm Technologies, Inc. MSM SDHCI Platform
  * driver source file
  *
- * Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1288,6 +1288,34 @@ retry:
 		} else {
 			pr_debug("%s: %s: found ## bad ## phase = %d\n",
 				mmc_hostname(mmc), __func__, phase);
+
+			if (phase == 15 && tuned_phase_cnt) {
+				pr_err("%s: %s: Ping with known good phase\n",
+					mmc_hostname(mmc), __func__);
+				/* set the phase in delay line hw block */
+				rc = msm_config_cm_dll_phase(host,
+					tuned_phases[tuned_phase_cnt - 1]);
+				if (rc)
+					goto kfree;
+
+				cmd.opcode = opcode;
+				cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
+
+				data.blksz = size;
+				data.blocks = 1;
+				data.flags = MMC_DATA_READ;
+				data.timeout_ns = 1000 * 1000 * 1000;
+
+				data.sg = &sg;
+				data.sg_len = 1;
+				sg_init_one(&sg, data_buf, size);
+				memset(data_buf, 0, size);
+				mmc_wait_for_req(mmc, &mrq);
+
+				if ((cmd.error || data.error))
+					pr_err("%s: %s: Ping with known good phase failed\n",
+					mmc_hostname(mmc), __func__);
+			}
 		}
 	} while (++phase < 16);
 
@@ -5110,6 +5138,7 @@ static int sdhci_msm_suspend(struct device *dev)
 	struct sdhci_host *host = dev_get_drvdata(dev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+	struct mmc_host *mmc = host->mmc;
 	int ret = 0;
 	int sdio_cfg = 0;
 	ktime_t start = ktime_get();
@@ -5125,6 +5154,8 @@ static int sdhci_msm_suspend(struct device *dev)
 	}
 	ret = sdhci_msm_runtime_suspend(dev);
 out:
+	/* cancel any clock gating work scheduled by mmc_host_clk_release() */
+	cancel_delayed_work_sync(&mmc->clk_gate_work);
 	sdhci_msm_disable_controller_clock(host);
 	if (host->mmc->card && mmc_card_sdio(host->mmc->card)) {
 		sdio_cfg = sdhci_msm_cfg_sdio_wakeup(host, true);

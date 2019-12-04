@@ -27,7 +27,14 @@ static DEFINE_MUTEX(f2fs_stat_mutex);
 static void update_general_status(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_stat_info *si = F2FS_STAT(sbi);
+	struct f2fs_super_block *raw_super = F2FS_RAW_SUPER(sbi);
 	int i;
+
+	/* these will be changed if online resize is done */
+	si->main_area_segs = le32_to_cpu(raw_super->segment_count_main);
+	si->main_area_sections = le32_to_cpu(raw_super->section_count);
+	si->main_area_zones = si->main_area_sections /
+				le32_to_cpu(raw_super->secs_per_zone);
 
 	/* validation check of the segment numbers */
 	si->hit_largest = atomic64_read(&sbi->read_hit_largest);
@@ -522,30 +529,16 @@ void f2fs_destroy_stats(struct f2fs_sb_info *sbi)
 	kvfree(si);
 }
 
-int __init f2fs_create_root_stats(void)
+void __init f2fs_create_root_stats(void)
 {
-	struct dentry *file;
-
 	f2fs_debugfs_root = debugfs_create_dir("f2fs", NULL);
-	if (!f2fs_debugfs_root)
-		return -ENOMEM;
 
-	file = debugfs_create_file("status", S_IRUGO, f2fs_debugfs_root,
-			NULL, &stat_fops);
-	if (!file) {
-		debugfs_remove(f2fs_debugfs_root);
-		f2fs_debugfs_root = NULL;
-		return -ENOMEM;
-	}
-
-	return 0;
+	debugfs_create_file("status", S_IRUGO, f2fs_debugfs_root, NULL,
+			    &stat_fops);
 }
 
 void f2fs_destroy_root_stats(void)
 {
-	if (!f2fs_debugfs_root)
-		return;
-
 	debugfs_remove_recursive(f2fs_debugfs_root);
 	f2fs_debugfs_root = NULL;
 }

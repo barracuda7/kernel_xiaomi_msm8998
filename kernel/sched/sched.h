@@ -2,6 +2,7 @@
 #include <linux/sched.h>
 #include <linux/sched/sysctl.h>
 #include <linux/sched/rt.h>
+#include <linux/sched/smt.h>
 #include <linux/sched/deadline.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
@@ -429,7 +430,6 @@ struct related_thread_group {
 };
 
 extern struct list_head cluster_head;
-extern int num_clusters;
 extern struct sched_cluster *sched_cluster[NR_CPUS];
 
 struct cpu_cycle {
@@ -440,6 +440,7 @@ struct cpu_cycle {
 #define for_each_sched_cluster(cluster) \
 	list_for_each_entry_rcu(cluster, &cluster_head, list)
 
+extern unsigned int sched_disable_window_stats;
 #endif /* CONFIG_SCHED_HMP */
 
 /* CFS-related fields in a runqueue */
@@ -509,10 +510,6 @@ struct cfs_rq {
 	int on_list;
 	struct list_head leaf_cfs_rq_list;
 	struct task_group *tg;	/* group that "owns" this runqueue */
-
-#ifdef CONFIG_SCHED_WALT
-	u64 cumulative_runnable_avg;
-#endif
 
 #ifdef CONFIG_CFS_BANDWIDTH
 
@@ -796,6 +793,7 @@ struct rq {
 
 	int cstate, wakeup_latency, wakeup_energy;
 	u64 window_start;
+	u64 load_reported_window;
 	unsigned long hmp_flags;
 
 	u64 cur_irqload;
@@ -1857,7 +1855,7 @@ static __always_inline bool static_branch_##name(struct static_key *key) \
 extern struct static_key sched_feat_keys[__SCHED_FEAT_NR];
 #define sched_feat(x) (static_branch_##x(&sched_feat_keys[__SCHED_FEAT_##x]))
 #else /* !(SCHED_DEBUG && HAVE_JUMP_LABEL) */
-#define sched_feat(x) (sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
+#define sched_feat(x) !!(sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
 #endif /* SCHED_DEBUG && HAVE_JUMP_LABEL */
 
 extern struct static_key_false sched_numa_balancing;
@@ -2030,7 +2028,6 @@ static const u32 prio_to_wmult[40] = {
 #define DEQUEUE_SLEEP		0x01
 #define DEQUEUE_SAVE		0x02 /* matches ENQUEUE_RESTORE */
 #define DEQUEUE_MOVE		0x04 /* matches ENQUEUE_MOVE */
-#define DEQUEUE_IDLE		0x80 /* The last dequeue before IDLE */
 
 #define ENQUEUE_WAKEUP		0x01
 #define ENQUEUE_RESTORE		0x02
@@ -2354,26 +2351,6 @@ static __always_inline
 unsigned long arch_scale_freq_capacity(struct sched_domain *sd, int cpu)
 {
 	return SCHED_CAPACITY_SCALE;
-}
-#endif
-
-#ifndef arch_scale_max_freq_capacity
-static __always_inline
-unsigned long arch_scale_max_freq_capacity(struct sched_domain *sd, int cpu)
-{
-	return SCHED_CAPACITY_SCALE;
-}
-#endif
-
-#ifndef arch_scale_min_freq_capacity
-static __always_inline
-unsigned long arch_scale_min_freq_capacity(struct sched_domain *sd, int cpu)
-{
-	/*
-	 * Multiplied with any capacity value, this scale factor will return
-	 * 0, which represents an un-capped state
-	 */
-	return 0;
 }
 #endif
 
@@ -2876,6 +2853,18 @@ DECLARE_PER_CPU(struct update_util_data *, cpufreq_update_util_data);
 static inline void cpufreq_update_util(struct rq *rq, unsigned int flags)
 {
         struct update_util_data *data;
+
+#ifdef CONFIG_SCHED_HMP
+	/*
+	 * Skip if we've already reported, but not if this is an inter-cluster
+	 * migration
+	 */
+	if (!sched_disable_window_stats &&
+		(rq->load_reported_window == rq->window_start) &&
+		!(flags & SCHED_CPUFREQ_INTERCLUSTER_MIG))
+		return;
+	rq->load_reported_window = rq->window_start;
+#endif
 
         data = rcu_dereference_sched(*this_cpu_ptr(&cpufreq_update_util_data));
         if (data)
